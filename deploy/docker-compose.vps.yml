@@ -23,7 +23,7 @@ services:
     environment:
       DATA_DIR: /data
       SIGNUP: first
-    entrypoint: ["node", "-e", "fetch('https://raw.githubusercontent.com/anthonybima/finplan/site/api-run.mjs').then(r=>{if(!r.ok)throw new Error(r.status);return r.text()}).then(t=>{require('fs').writeFileSync('/tmp/api-run.mjs',t);return import('/tmp/api-run.mjs')}).catch(e=>{console.error(e);process.exit(1)})"]
+    entrypoint: ["/bin/sh", "-c", "wget -qO /tmp/api-run.mjs https://raw.githubusercontent.com/anthonybima/finplan/site/api-run.mjs && exec node /tmp/api-run.mjs"]
     volumes:
       - finplan_cloud:/data
 volumes:
