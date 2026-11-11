@@ -1,22 +1,17 @@
 # FinPlan on a VPS (Hostinger Docker manager): HTTPS site + automatic updates from GitHub.
+# Uses the stock caddy image; deploy/run.sh (from the `site` branch) downloads the latest build,
+# serves it, and checks for a new build every 5 minutes.
 services:
   finplan:
-    image: ghcr.io/anthonybima/finplan:latest
+    image: caddy:2-alpine
     restart: unless-stopped
     ports: ["80:80", "443:443", "443:443/udp"]
     environment:
       SITE_ADDRESS: finplan.bimabearing.cloud
+    entrypoint: ["/bin/sh", "-c", "wget -qO /run.sh https://raw.githubusercontent.com/anthonybima/finplan/site/run.sh && exec sh /run.sh"]
     volumes:
       - caddy_data:/data
       - caddy_config:/config
-    labels:
-      com.centurylinklabs.watchtower.enable: "true"
-  watchtower:
-    image: containrrr/watchtower
-    restart: unless-stopped
-    command: --label-enable --cleanup --interval 300
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
 volumes:
   caddy_data:
   caddy_config:

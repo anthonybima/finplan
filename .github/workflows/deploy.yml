@@ -1,14 +1,41 @@
-# Push to main → build the FinPlan image → ghcr.io/<owner>/finplan:latest.
-# The VPS runs Watchtower, which pulls the new image within ~5 minutes: the live site updates itself.
+# Push to main → build FinPlan and publish it two ways:
+#  - `site` branch: the built web app + Caddyfile + run.sh. The VPS (stock caddy image, deploy/docker-compose.vps.yml)
+#    checks it every 5 minutes and swaps in new builds — no registry needed.
+#  - ghcr.io/<owner>/finplan:latest: a self-contained image (needs the package to be public to pull anonymously).
 name: Build & publish
 on:
   push:
     branches: [main]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
   packages: write
 jobs:
+  site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
+          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
+        run: npm install --no-audit --no-fund && npm run build:web
+      - name: Publish to the site branch
+        env:
+          TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p /tmp/site/www
+          cp -r dist-web/. /tmp/site/www/
+          sed 's#root \* /srv/finplan#root * /srv/finplan/www#' deploy/Caddyfile.docker > /tmp/site/Caddyfile
+          cp deploy/run.sh /tmp/site/run.sh
+          cd /tmp/site
+          git init -q -b site
+          git add -A
+          git -c user.name=finplan-bot -c user.email=finplan-bot@users.noreply.github.com commit -qm "site build ${GITHUB_SHA}"
+          git push -f "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" site
   image:
     runs-on: ubuntu-latest
     steps:
