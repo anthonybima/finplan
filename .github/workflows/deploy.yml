@@ -1,5 +1,5 @@
 # Push to main → build FinPlan and publish it two ways:
-#  - `site` branch: the built web app + Caddyfile + run.sh. The VPS (stock caddy image, deploy/docker-compose.vps.yml)
+#  - `site` branch: the built web app + Caddyfile + run.sh + the FinPlan Cloud server (server.mjs, api-run.mjs). The VPS (stock caddy image, deploy/docker-compose.vps.yml)
 #    checks it every 5 minutes and swaps in new builds — no registry needed.
 #  - ghcr.io/<owner>/finplan:latest: a self-contained image (needs the package to be public to pull anonymously).
 name: Build & publish
@@ -21,7 +21,6 @@ jobs:
       - name: Build
         env:
           ELECTRON_SKIP_BINARY_DOWNLOAD: "1"
-          VITE_GOOGLE_CLIENT_ID: ${{ vars.VITE_GOOGLE_CLIENT_ID }}
         run: npm install --no-audit --no-fund && npm run build:web
       - name: Publish to the site branch
         env:
@@ -31,6 +30,8 @@ jobs:
           cp -r dist-web/. /tmp/site/www/
           sed 's#root \* /srv/finplan#root * /srv/finplan/www#' deploy/Caddyfile.docker > /tmp/site/Caddyfile
           cp deploy/run.sh /tmp/site/run.sh
+          cp server/server.mjs deploy/api-run.mjs /tmp/site/
+          node --check /tmp/site/server.mjs && node --check /tmp/site/api-run.mjs
           cd /tmp/site
           git init -q -b site
           git add -A
@@ -50,7 +51,6 @@ jobs:
         with:
           context: .
           push: true
-          build-args: VITE_GOOGLE_CLIENT_ID=${{ vars.VITE_GOOGLE_CLIENT_ID }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/finplan:latest
             ghcr.io/${{ github.repository_owner }}/finplan:${{ github.sha }}

@@ -1,6 +1,9 @@
-# FinPlan on a VPS (Hostinger Docker manager): HTTPS site + automatic updates from GitHub.
-# Uses the stock caddy image; deploy/run.sh (from the `site` branch) downloads the latest build,
-# serves it, and checks for a new build every 5 minutes.
+# FinPlan on a VPS (Hostinger Docker manager): HTTPS website + FinPlan Cloud (email/password sync), auto-updated from GitHub.
+#  - finplan:     stock caddy image; run.sh (from the `site` branch) downloads the latest build, serves it with
+#                 automatic HTTPS and proxies /api/* to finplan-api. Checks for a new build every 5 minutes.
+#  - finplan-api: stock node image; api-run.mjs downloads server.mjs from the `site` branch and runs it.
+#                 Encrypted sync copies + accounts live in the finplan_cloud volume (back it up with VPS snapshots).
+# Sign-up: SIGNUP=first (only the first account, then closed), or ALLOWED_EMAILS="a@x.com,b@y.com", or SIGNUP=open.
 services:
   finplan:
     image: caddy:2-alpine
@@ -8,10 +11,22 @@ services:
     ports: ["80:80", "443:443", "443:443/udp"]
     environment:
       SITE_ADDRESS: finplan.bimabearing.cloud
+      API_UPSTREAM: finplan-api:8080
     entrypoint: ["/bin/sh", "-c", "wget -qO /run.sh https://raw.githubusercontent.com/anthonybima/finplan/site/run.sh && exec sh /run.sh"]
     volumes:
       - caddy_data:/data
       - caddy_config:/config
+    depends_on: [finplan-api]
+  finplan-api:
+    image: node:22-alpine
+    restart: unless-stopped
+    environment:
+      DATA_DIR: /data
+      SIGNUP: first
+    entrypoint: ["node", "-e", "fetch('https://raw.githubusercontent.com/anthonybima/finplan/site/api-run.mjs').then(r=>{if(!r.ok)throw new Error(r.status);return r.text()}).then(t=>{require('fs').writeFileSync('/tmp/api-run.mjs',t);return import('/tmp/api-run.mjs')}).catch(e=>{console.error(e);process.exit(1)})"]
+    volumes:
+      - finplan_cloud:/data
 volumes:
   caddy_data:
   caddy_config:
+  finplan_cloud:

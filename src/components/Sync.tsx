@@ -1,9 +1,11 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { Cloud, CloudOff, RefreshCw, Link2, Unlink, Trash2, KeyRound, ExternalLink } from 'lucide-react';
+import { Cloud, CloudOff, RefreshCw, Link2, Unlink, Trash2, KeyRound, LogOut } from 'lucide-react';
 import type { AppData } from '../lib/types';
 import { Card, Modal, Field, toast } from './ui';
 import * as G from '../lib/gdrive';
 import { onClaudeStore } from '../lib/claudeCloud';
+import * as Srv from '../lib/serverCloud';
+import { CloudSignIn } from './CloudSignIn';
 import * as S from '../lib/sync';
 import { getDevice } from '../lib/auth';
 
@@ -41,12 +43,14 @@ export function SyncProvider({ uid, name = 'FinPlan', data, setData, children }:
   const prevData = useRef<AppData | null>(data);
   const changedWhileRunning = useRef(false); // a local change made during a sync round must still be pushed afterwards
 
-  useEffect(() => { getDevice().then((d) => setDevice(d.name || `${d.browser} on ${d.os}`)).catch(() => {}); G.consumeRedirectResult(); }, []);
+  useEffect(() => { getDevice().then((d) => setDevice(d.name || `${d.browser} on ${d.os}`)).catch(() => {}); }, []);
+  const [signIn, setSignIn] = useState(false);
 
   const onConflict: S.Conflict = (info) => new Promise((resolve) => setConflict({ ...info, resolve: (c) => { setConflict(null); resolve(c); } }));
 
   const syncNow = useCallback(async (interactive: boolean) => {
     if (!supported || !S.loadState(uid).enabled || !dataRef.current) return;
+    if (!G.currentToken()) { setPhase('needs-auth'); if (interactive) setSignIn(true); return; }
     if (running.current) return running.current;
     const run = (async () => {
       setPhase('syncing'); lastCheck.current = Date.now();
@@ -57,6 +61,7 @@ export function SyncProvider({ uid, name = 'FinPlan', data, setData, children }:
       } catch (e: any) {
         const st = { ...S.loadState(uid), lastError: e?.message || String(e) }; S.saveState(uid, st); setState(st);
         setPhase(e instanceof G.NeedsSignIn ? 'needs-auth' : 'error');
+        if (e instanceof G.NeedsSignIn && interactive) setSignIn(true);
       } finally {
         running.current = null;
         if (changedWhileRunning.current) { // the round saved its state as clean: mark the newer local change and push it
@@ -71,7 +76,7 @@ export function SyncProvider({ uid, name = 'FinPlan', data, setData, children }:
   // inside Claude, storage becomes available a moment after start: leave the 'unsupported' state then
   useEffect(() => { if (supported && phase === 'unsupported') setPhase(S.loadState(uid).enabled ? 'idle' : 'off'); }, [supported]);
 
-  // pull when opened (silently, if a Google token is still valid) and when the app comes back to the foreground
+  // pull when opened (silently, if signed in) and when the app comes back to the foreground
   useEffect(() => {
     if (!supported || !state.enabled || !data) return;
     if (G.currentToken()) syncNow(false); else setPhase('needs-auth');
@@ -97,7 +102,7 @@ export function SyncProvider({ uid, name = 'FinPlan', data, setData, children }:
     try {
       if (deleteCloud) { const tok = await G.getToken(true, state.email); const m = await G.findSyncFile(tok, state.account || uid, state.fileId, false); if (m) await G.deleteFile(tok, m.id); }
     } catch (e: any) { toast(e?.message || 'Could not delete the cloud copy'); return; }
-    await S.forgetKey(); S.clearState(uid); G.forgetToken();
+    await S.forgetKey(); S.clearState(uid);
     setState(S.loadState(uid)); setPhase('off');
     toast(deleteCloud ? 'Sync turned off and cloud copy deleted' : 'This device stopped syncing');
   };
@@ -106,6 +111,11 @@ export function SyncProvider({ uid, name = 'FinPlan', data, setData, children }:
   return (
     <SyncCtx.Provider value={ctl}>
       {children}
+      {signIn && (
+        <Modal title="Sign in to FinPlan Cloud" onClose={() => setSignIn(false)}>
+          <CloudSignIn intro={<p className="small muted" style={{ marginTop: 0 }}>Sign in with the FinPlan Cloud account this user syncs with{state.email ? <> (<b>{state.email}</b>)</> : ''}.</p>} onDone={() => { setSignIn(false); setTimeout(() => syncNow(true), 50); }} />
+        </Modal>
+      )}
       {setup && <SetupModal uid={uid} name={name} data={data} device={device} onClose={() => setSetup(false)} onDone={(st, d) => { setSetup(false); setState(st); setPhase('idle'); if (d) { applying.current = true; setData(d); } }} />}
       {conflict && (
         <Modal title="Both devices changed" onClose={() => conflict.resolve('merge')}>
@@ -124,8 +134,7 @@ export function SyncProvider({ uid, name = 'FinPlan', data, setData, children }:
 
 /** Connect this device: create the cloud copy (first device) or join it (other devices). */
 function SetupModal({ uid, name, data, device, onClose, onDone }: { uid: string; name: string; data: AppData | null; device: string; onClose: () => void; onDone: (st: S.SyncState, d?: AppData) => void }) {
-  const [cid, setCid] = useState(G.clientId());
-  const [step, setStep] = useState<'client' | 'connect' | 'create' | 'join' | 'apply' | 'choose'>(G.needsClientId() ? 'client' : 'connect');
+  const [step, setStep] = useState<'signin' | 'connect' | 'create' | 'join' | 'apply' | 'choose'>(G.currentToken() ? 'connect' : 'signin');
   const [busy, setBusy] = useState(false);
   const [tok, setTok] = useState<G.Token | null>(null);
   const [info, setInfo] = useState<S.RemoteInfo | null>(null);
@@ -135,14 +144,14 @@ function SetupModal({ uid, name, data, device, onClose, onDone }: { uid: string;
   const connect = async () => {
     setBusy(true);
     try {
-      const t = await G.getToken(true); const email = await G.whoAmI(t); const tt = { ...t, email };
+      const tt = await G.getToken(true);
       setTok(tt);
       let i = await S.inspectRemote(tt, uid);
       const same = !i.exists && i.others.filter((o) => (o.accountName || '').toLowerCase() === name.toLowerCase());
       if (same && same.length === 1) i = { ...i, exists: true, meta: same[0], file: await S.readFile(tt, same[0]) }; // same account name → offer it directly
       setInfo(i);
       setStep(i.exists ? 'join' : i.others.length ? 'choose' : 'create');
-    } catch (e: any) { toast(e?.message || 'Google sign-in failed'); }
+    } catch (e: any) { if (e instanceof G.NeedsSignIn) setStep('signin'); toast(e?.message || 'Could not reach the cloud'); }
     setBusy(false);
   };
   const create = async () => {
@@ -172,37 +181,28 @@ function SetupModal({ uid, name, data, device, onClose, onDone }: { uid: string;
   };
 
   return (
-    <Modal title={`Sync with ${G.usingClaude() ? 'your Claude account' : 'Google Drive'}`} onClose={onClose}>
-      {step === 'client' && (
-        <>
-          <p className="small" style={{ marginTop: 0 }}>FinPlan needs your own Google <b>OAuth client ID</b> (free, one-time setup in Google Cloud — see the guide in the README / upload guide, section “Sync”). Authorized JavaScript origin and redirect URI:</p>
-          <pre className="small" style={{ whiteSpace: 'pre-wrap', background: 'var(--bg)', padding: 8, borderRadius: 8 }}>{location.origin}{'\n'}{G.redirectUri()}</pre>
-          <Field label="OAuth client ID" full><input className="input" value={cid} onChange={(e) => setCid(e.target.value)} placeholder="1234567890-abc123.apps.googleusercontent.com" /></Field>
-          <div className="row mt-s" style={{ justifyContent: 'flex-end' }}>
-            <a className="btn ghost" href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noreferrer"><ExternalLink size={14} /> Google Cloud</a>
-            <button className="btn primary" disabled={!G.validClientId(cid)} onClick={() => { G.setClientId(cid); setStep('connect'); }}>Save</button>
-          </div>
-        </>
+    <Modal title={`Sync with ${G.cloudLabel()}`} onClose={onClose}>
+      {step === 'signin' && (
+        <CloudSignIn intro={<p className="small" style={{ marginTop: 0 }}>Your encrypted FinPlan copy is kept on <b>FinPlan Cloud</b> (this website's server). Sign in, or create your account on the first device; use the same email and password on your phone.</p>} onDone={() => setStep('connect')} />
       )}
       {step === 'connect' && (
         <>
           {G.usingClaude()
             ? <p style={{ marginTop: 0 }}>FinPlan keeps an encrypted copy in <b>your Claude account's private storage</b> for FinPlan (nobody else can read it). Open FinPlan in Claude on your phone or another computer, signed in to the same Claude account, to get the same data.</p>
-            : <p style={{ marginTop: 0 }}>Sign in with the Google account whose Drive should hold your encrypted FinPlan copy. FinPlan only gets its own hidden app folder; it can't see your other files.</p>}
+            : <p style={{ marginTop: 0 }}>Signed in to FinPlan Cloud as <b>{G.currentToken()?.email}</b>. FinPlan keeps one encrypted copy per FinPlan user there.</p>}
           <ul className="small muted">
             <li>Everything is encrypted on this device with a <b>sync password</b> before upload.</li>
             <li>Your Bitget/Bittime/Alpaca/Claude API keys are never synced.</li>
-            {!G.usingClaude() && <li>Allow pop-ups for this site if the Google window doesn't open.</li>}
           </ul>
           <div className="row" style={{ justifyContent: 'space-between' }}>
-            {!G.usingClaude() ? <button className="btn ghost sm" onClick={() => setStep('client')}>Change client ID</button> : <span />}
-            <button className="btn primary" disabled={busy} onClick={connect}><Link2 size={15} /> {busy ? (G.usingClaude() ? 'Checking…' : 'Waiting for Google…') : G.usingClaude() ? 'Continue' : 'Connect Google Drive'}</button>
+            {!G.usingClaude() ? <button className="btn ghost sm" onClick={async () => { await Srv.signOut(); setStep('signin'); }}>Use another email</button> : <span />}
+            <button className="btn primary" disabled={busy} onClick={connect}><Link2 size={15} /> {busy ? 'Checking…' : 'Continue'}</button>
           </div>
         </>
       )}
       {step === 'choose' && info && (
         <>
-          <p style={{ marginTop: 0 }}>{G.usingClaude() ? 'Your Claude account' : <>This Google Drive{tok?.email ? <> (<b>{tok.email}</b>)</> : ''}</>} holds other FinPlan accounts. Each account syncs its own data only.</p>
+          <p style={{ marginTop: 0 }}>{G.usingClaude() ? 'Your Claude account' : <>Your FinPlan Cloud account{tok?.email ? <> (<b>{tok.email}</b>)</> : ''}</>} holds other FinPlan users. Each one syncs its own data only.</p>
           {info.others.map((o) => (
             <button key={o.id} className="item btn ghost" style={{ width: '100%', justifyContent: 'flex-start', border: '1px solid var(--line)', marginBottom: 8, padding: 10 }}
               onClick={async () => { setBusy(true); try { setInfo({ ...info, exists: true, meta: o, file: await S.readFile(tok!, o) }); setStep('join'); } catch (e: any) { toast(e?.message || 'Could not read it'); } setBusy(false); }}>
@@ -247,26 +247,27 @@ export function SyncCard() {
   const head = <><Cloud size={17} style={{ verticalAlign: -3 }} /> Sync between devices</>;
   if (s.phase === 'unsupported') return (
     <Card title={head}>
-      <p className="small muted">Sync runs inside Claude (your Claude account) and on the FinPlan website (Google Drive). In the desktop/phone app build, move data with an encrypted backup (below).</p></Card>
+      <p className="small muted">Sync runs inside Claude (your Claude account) and on the FinPlan website (FinPlan Cloud, email + password). In the desktop/phone app build, move data with an encrypted backup (below).</p></Card>
   );
   if (s.phase === 'off') return (
     <Card title={head}>
-      <p className="small muted" style={{ marginTop: 0 }}>Use this same user on your phone and laptop. FinPlan keeps an <b>end-to-end encrypted</b> copy {G.usingClaude() ? <>in your Claude account's private FinPlan storage (open FinPlan in Claude on each device)</> : <>in a hidden app folder of your Google Drive</>}; only your sync password can open it.</p>
-      <button className="btn primary" onClick={s.openSetup}><Link2 size={15} /> {G.usingClaude() ? 'Turn on sync' : 'Set up Google Drive sync'}</button></Card>
+      <p className="small muted" style={{ marginTop: 0 }}>Use this same user on your phone and laptop. FinPlan keeps an <b>end-to-end encrypted</b> copy {G.usingClaude() ? <>in your Claude account's private FinPlan storage (open FinPlan in Claude on each device)</> : <>on FinPlan Cloud, this website's server, under your email + password</>}; only your sync password can open it.</p>
+      <button className="btn primary" onClick={s.openSetup}><Link2 size={15} /> Turn on sync</button></Card>
   );
   return (
     <Card title={head}>
       <div className="row small" style={{ marginBottom: 8 }}>
         <span className={`pill ${s.phase === 'idle' ? 'good' : s.phase === 'error' ? 'bad' : ''}`}>{s.phase === 'syncing' ? 'Syncing…' : s.phase === 'needs-auth' ? 'Paused' : s.phase === 'error' ? 'Error' : 'On'}</span>
-        <span className="muted">{G.usingClaude() ? 'Claude account' : s.state.email || 'Google Drive'} · last sync {ago(s.state.lastSyncAt)}{s.state.dirty ? ' · changes waiting' : ''}</span>
+        <span className="muted">{G.usingClaude() ? 'Claude account' : G.currentToken()?.email || s.state.email || 'FinPlan Cloud'} · last sync {ago(s.state.lastSyncAt)}{s.state.dirty ? ' · changes waiting' : ''}</span>
       </div>
       {s.state.lastError && s.phase !== 'idle' && <div className="small" style={{ color: 'var(--bad)', marginBottom: 8 }}>{s.state.lastError}</div>}
       <div className="row">
-        <button className="btn primary sm" disabled={s.phase === 'syncing'} onClick={() => s.syncNow(true)}><RefreshCw size={14} className={s.phase === 'syncing' ? 'spin' : ''} /> {s.phase === 'needs-auth' ? 'Reconnect & sync' : 'Sync now'}</button>
+        <button className="btn primary sm" disabled={s.phase === 'syncing'} onClick={() => s.syncNow(true)}><RefreshCw size={14} className={s.phase === 'syncing' ? 'spin' : ''} /> {s.phase === 'needs-auth' ? 'Sign in & sync' : 'Sync now'}</button>
         <button className="btn sm" onClick={() => s.disconnect(false)}><Unlink size={14} /> Stop on this device</button>
         <button className="btn sm danger" onClick={() => { if (!arm) { setArm(true); setTimeout(() => setArm(false), 4000); return; } s.disconnect(true); }}><Trash2 size={14} /> {arm ? 'Tap again to delete cloud copy' : 'Delete cloud copy'}</button>
       </div>
-      <div className="small muted mt-s">This device: {s.device}.{G.usingClaude() ? ' Syncs automatically while FinPlan is open in Claude.' : ' Google sign-in lasts about an hour; after that FinPlan asks you to tap Reconnect.'}</div>
+      {!G.usingClaude() && G.currentToken() && <div className="row mt-s"><button className="btn ghost sm" onClick={async () => { await Srv.signOut(); s.syncNow(false); }}><LogOut size={14} /> Sign out of FinPlan Cloud</button></div>}
+      <div className="small muted mt-s">This device: {s.device}.{G.usingClaude() ? ' Syncs automatically while FinPlan is open in Claude.' : ' Stays signed in to FinPlan Cloud for 30 days of use; syncs automatically while FinPlan is open.'}</div>
     </Card>
   );
 }
@@ -288,5 +289,5 @@ export function SyncChip() {
 export function WelcomeSyncButton() {
   const s = useSync();
   if (!s || s.phase === 'unsupported') return null;
-  return <button className="btn" onClick={s.openSetup}><Cloud size={16} /> {G.usingClaude() ? 'Get my data from another device' : 'Sync from Google Drive'}</button>;
+  return <button className="btn" onClick={s.openSetup}><Cloud size={16} /> Get my data from another device</button>;
 }

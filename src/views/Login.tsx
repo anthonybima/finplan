@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Lock, Plus, KeyRound, ArrowLeft, Copy, ShieldCheck, Monitor, Eye, EyeOff, Cloud, ExternalLink } from 'lucide-react';
+import { Lock, Plus, KeyRound, ArrowLeft, Copy, ShieldCheck, Monitor, Eye, EyeOff, Cloud } from 'lucide-react';
 import { createUser, getDevice, hasLegacyData, listUsers, loadVault, login, passwordProblems, recoverWithCode, saveVault, secondsLocked, type DeviceInfo, type Session, type UserRec } from '../lib/auth';
 import * as G from '../lib/gdrive';
 import { onClaudeStore } from '../lib/claudeCloud';
+import { signOut as signOutCloud } from '../lib/serverCloud';
+import { CloudSignIn } from '../components/CloudSignIn';
 import * as S from '../lib/sync';
 import { setSecretNamespace } from '../lib/secure';
 import { Logo } from '../components/ui';
@@ -40,15 +42,15 @@ export default function Login({ onSession, lockedUser }: { onSession: (s: Sessio
   const [lock, setLock] = useState(0);
   const [notice] = useState(() => { try { const n = sessionStorage.getItem('finplan.removedNotice'); if (n) sessionStorage.removeItem('finplan.removedNotice'); return n; } catch { return null; } });
   const [, bumpCloud] = useState(0);
-  useEffect(() => { getDevice().then(setDevice); G.consumeRedirectResult(); const off = onClaudeStore(() => bumpCloud((n) => n + 1)); return () => { off(); }; }, []);
-  // ---- use an account from another device (its Google Drive copy) ----
+  useEffect(() => { getDevice().then(setDevice); const off = onClaudeStore(() => bumpCloud((n) => n + 1)); return () => { off(); }; }, []);
+  // ---- use an account from another device (its cloud copy) ----
   const cloudOk = G.driveSyncSupported();
-  const [cid, setCid] = useState(G.clientId());
   const [tok, setTok] = useState<G.Token | null>(null);
   const [cloudList, setCloudList] = useState<G.RemoteMeta[] | null>(null);
   const [pickC, setPickC] = useState<G.RemoteMeta | null>(null);
   const [devPw, setDevPw] = useState('');
   const [, rerender] = useState(0);
+  const signedIn = !!G.currentToken();
   useEffect(() => { if (!sel) return; const t = setInterval(() => setLock(secondsLocked(sel.id)), 1000); setLock(secondsLocked(sel.id)); return () => clearInterval(t); }, [sel]);
 
   const go = (m: Mode) => { setMode(m); setErr(''); setPw(''); setPw2(''); setCode(''); };
@@ -68,10 +70,10 @@ export default function Login({ onSession, lockedUser }: { onSession: (s: Sessio
   });
   const strength = pw ? passwordProblems(pw) : null;
 
-  const connectGoogle = () => run(async () => {
-    const t = await G.getToken(true); const email = await G.whoAmI(t); const tt = { ...t, email }; setTok(tt);
+  const findAccounts = () => run(async () => {
+    let tt: G.Token; try { tt = await G.getToken(true); } catch (e) { rerender((n) => n + 1); throw e; } setTok(tt);
     const all = (await G.listSyncFiles(tt));
-    if (!all.length) throw new Error(`No FinPlan account found in ${email || 'this Google Drive'}. On the device that has your data: Settings → Sync between devices → turn on, then try again.`);
+    if (!all.length) throw new Error(`No FinPlan account found in ${tt.email || 'this cloud account'}. On the device that has your data: Settings → Sync between devices → turn on, then try again.`);
     setCloudList(all); if (all.length === 1) setPickC(all[0]);
   });
   const cloudName = (m: G.RemoteMeta) => m.accountName || 'FinPlan (older copy)';
@@ -144,13 +146,13 @@ export default function Login({ onSession, lockedUser }: { onSession: (s: Sessio
         {mode === 'cloud' && (<>
           <h2>Use my account from another device</h2>
           <p className="small muted" style={{ marginTop: 0 }}>Opens the same FinPlan account (e.g. the one on your computer) with its data, and keeps both in sync through {G.cloudLabel()}. Each account only sees its own data. Needs sync turned on there first (Settings → Sync between devices).{G.usingClaude() ? ' Both devices must use FinPlan in Claude, signed in to the same Claude account.' : ''}</p>
-          {G.needsClientId() ? (<>
-            <label className="field small">Google OAuth client ID (same as on your computer: Settings → Sync)<input className="input" value={cid} onChange={(e) => setCid(e.target.value)} placeholder="1234567890-abc123.apps.googleusercontent.com" /></label>
-            <button className="btn primary mt" style={{ width: '100%' }} disabled={!G.validClientId(cid)} onClick={() => { G.setClientId(cid); rerender((n) => n + 1); }}>Save</button>
-          </>) : !cloudList ? (
-            <button className="btn primary" style={{ width: '100%' }} disabled={busy} onClick={connectGoogle}>{G.usingClaude() ? <Cloud size={16} /> : <ExternalLink size={16} />} {busy ? (G.usingClaude() ? 'Looking…' : 'Waiting for Google…') : G.usingClaude() ? 'Find my accounts' : 'Sign in with Google'}</button>
-          ) : (<>
-            <div className="small muted" style={{ marginBottom: 6 }}>Accounts in {tok?.email || 'your Google Drive'}:</div>
+          {!G.usingClaude() && !signedIn ? (
+            <CloudSignIn intro={<p className="small" style={{ marginTop: 0 }}>Sign in with the <b>FinPlan Cloud</b> email and password you used on your computer.</p>} onDone={() => { rerender((n) => n + 1); findAccounts(); }} />
+          ) : !cloudList ? (<>
+            {!G.usingClaude() && <div className="small muted" style={{ marginBottom: 6 }}>Signed in to FinPlan Cloud as <b>{G.currentToken()?.email}</b> · <a href="#" onClick={async (e) => { e.preventDefault(); await signOutCloud(); rerender((n) => n + 1); }}>use another email</a></div>}
+            <button className="btn primary" style={{ width: '100%' }} disabled={busy} onClick={findAccounts}><Cloud size={16} /> {busy ? 'Looking…' : 'Find my accounts'}</button>
+          </>) : (<>
+            <div className="small muted" style={{ marginBottom: 6 }}>Accounts in {tok?.email || 'your cloud'}:</div>
             {cloudList.map((c) => (
               <button key={c.id} className={`item btn ghost ${pickC?.id === c.id ? 'active' : ''}`} style={{ width: '100%', justifyContent: 'flex-start', border: `1px solid ${pickC?.id === c.id ? 'var(--brand)' : 'var(--line)'}`, marginBottom: 8, padding: 10 }} onClick={() => { setPickC(c); setErr(''); }}>
                 <Avatar u={{ name: cloudName(c), color: '#0f766e' }} /><div style={{ textAlign: 'left' }}><div style={{ fontWeight: 700 }}>{cloudName(c)}</div><div className="small muted">last saved by {c.device || 'another device'} · {new Date(c.modifiedTime).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</div></div>
@@ -164,7 +166,7 @@ export default function Login({ onSession, lockedUser }: { onSession: (s: Sessio
           </>)}
           {err && <div className="small neg mt-s">{err}</div>}
           <button className="btn ghost mt-s" style={{ width: '100%' }} onClick={() => { setCloudList(null); setPickC(null); go(users.length ? (users.length > 1 ? 'pick' : 'password') : 'create'); }}><ArrowLeft size={16} /> Back</button>
-          <p className="small muted mt">Your password never leaves this device; {G.cloudLabel()} only stores the encrypted copy.</p>
+          {(G.usingClaude() || signedIn) && <p className="small muted mt">Your password never leaves this device; {G.cloudLabel()} only stores the encrypted copy.</p>}
         </>)}
 
         {mode === 'recover' && sel && (<>

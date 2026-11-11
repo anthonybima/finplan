@@ -7,8 +7,6 @@ COPY package.json package-lock.json ./
 ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
 RUN npm install --no-audit --no-fund
 COPY . .
-ARG VITE_GOOGLE_CLIENT_ID=""
-ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
 RUN npm run build:web
 
 FROM caddy:2-alpine

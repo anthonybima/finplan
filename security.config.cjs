@@ -4,7 +4,6 @@ const connect = [
   'https://api.bitget.com', 'https://openapi.bittime.com',
   'https://api.alpaca.markets', 'https://paper-api.alpaca.markets',
   'https://mcp.pluang.com', 'https://api.anthropic.com',
-  'https://www.googleapis.com',
   'https://query1.finance.yahoo.com', 'https://query2.finance.yahoo.com',
   'https://news.google.com', 'https://www.cnbcindonesia.com',
   'https://data.alpaca.markets',

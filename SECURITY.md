@@ -42,10 +42,15 @@ Run `npm run audit`. SheetJS (`xlsx`) is installed from the official SheetJS CDN
 ## Dependency note: SheetJS (Excel import)
 `package.json` installs the patched SheetJS **0.20.3** from the official CDN (`cdn.sheetjs.com`); the npm-registry `xlsx` package stops at 0.18.5, which has known advisories (prototype pollution GHSA-4r6h-8v6p-xvw6, ReDoS GHSA-5pgg-2g8v-p4x9). Build on your own machine with `npm install` so you get 0.20.3; check with `npm ls xlsx`. It only parses files you choose to import (max 15 MB).
 
-## Google Drive sync
-- Scope `drive.appdata` only (non-sensitive; FinPlan's hidden app folder). OAuth token flow in a popup returning to `/oauth-google.html` on your own origin; the token is handed over via same-origin storage, removed from the URL, kept in memory/sessionStorage for ≤1 h, never persisted.
-- Payload is encrypted on the device: PBKDF2-SHA256 (600,000) from the sync password → AES-256-GCM with AAD `finplan-sync-v1`. Google stores ciphertext + a revision number and device name. Tampering or a wrong password fails decryption.
-- The derived sync key is stored per device inside the user's vault secrets (encrypted with the vault key). API keys are never in the sync payload. CSP adds `connect-src https://www.googleapis.com` only.
+## FinPlan Cloud sync (website: email + password)
+- The website's own small server (`server/server.mjs`, Node built-ins only, behind Caddy at `/api`). No Google account or OAuth app needed.
+- **Password**: the browser derives a login key (PBKDF2-SHA256 310,000, salt `finplan-cloud-login:<email>`) and sends only that over HTTPS; the server stores scrypt(N=2^15, r=8, p=1) of it with a random salt. The readable password never leaves the device.
+- **Sessions**: random 256-bit bearer token (only its SHA-256 is stored on the server), 30 days sliding, kept in the browser's localStorage; *Sign out* ends it. Changing the password signs out every other session.
+- **Abuse limits**: 10 sign-in attempts per 15 min per IP, 15-min lock after 8 wrong passwords for an account, the same work for unknown emails, generic "wrong email or password" message.
+- **Sign-up**: only the first account by default (`SIGNUP=first`); or `ALLOWED_EMAILS=a@x.com,b@y.com`; or `SIGNUP=open`.
+- **Payload** is encrypted on the device: PBKDF2-SHA256 (600,000) from the sync password → AES-256-GCM with AAD `finplan-sync-v1`. The server stores ciphertext + revision, device name and account label only; tampering or a wrong password fails decryption. The sync password is separate from the cloud login, so the server can never decrypt.
+- Files: `/data/files/<user id>/<file id>.json` (mode 600) in the `finplan_cloud` Docker volume; per user ≤40 copies, ≤250 MB; 25 MB per copy. The service worker never caches `/api/*`.
+- The derived sync key is stored per device inside the user's vault secrets (encrypted with the vault key). API keys are never in the sync payload. CSP: `connect-src 'self'` covers `/api`.
 
 ### Sync inside Claude
 Inside Claude, the same end-to-end encrypted copy is kept in the artifact's database under `data/users/<Claude user id>/` — the platform's private per-person area (not readable by other viewers or the artifact owner); the root of the database is owner-only and unused. Only ciphertext is stored (AES-256-GCM, key from the sync password), in pieces of ≤180 KB, written as a new generation before the old one is deleted.
