@@ -2,7 +2,10 @@
 FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund
+# npm install (not ci): package.json pins the official SheetJS 0.20.3 tarball (cdn.sheetjs.com), newer than the lock file.
+# The website needs no desktop/phone shells: skip Electron's binary download.
+ENV ELECTRON_SKIP_BINARY_DOWNLOAD=1
+RUN npm install --no-audit --no-fund
 COPY . .
 ARG VITE_GOOGLE_CLIENT_ID=""
 ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
