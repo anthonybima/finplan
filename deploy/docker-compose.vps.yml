@@ -1,0 +1,22 @@
+# FinPlan on a VPS (Hostinger Docker manager): HTTPS site + automatic updates from GitHub.
+services:
+  finplan:
+    image: ghcr.io/anthonybima/finplan:latest
+    restart: unless-stopped
+    ports: ["80:80", "443:443", "443:443/udp"]
+    environment:
+      SITE_ADDRESS: finplan.bimabearing.cloud
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+  watchtower:
+    image: containrrr/watchtower
+    restart: unless-stopped
+    command: --label-enable --cleanup --interval 300
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+volumes:
+  caddy_data:
+  caddy_config:

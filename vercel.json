@@ -1,0 +1,47 @@
+{
+  "outputDirectory": "dist-web",
+  "buildCommand": "npm run build:web",
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        {
+          "key": "Content-Security-Policy",
+          "value": "default-src 'self'; script-src 'self' https://s3.tradingview.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://api.bitget.com https://openapi.bittime.com https://api.alpaca.markets https://paper-api.alpaca.markets https://mcp.pluang.com https://api.anthropic.com https://www.googleapis.com https://query1.finance.yahoo.com https://query2.finance.yahoo.com https://news.google.com https://www.cnbcindonesia.com https://data.alpaca.markets https://feeds.content.dowjones.io https://rss.nytimes.com https://www.bloomberg.com https://feeds.bloomberg.com https://www.investing.com https://api.allorigins.win https://corsproxy.io; frame-src https://*.tradingview.com https://www.tradingview-widget.com https://ssltvc.investing.com; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; upgrade-insecure-requests; frame-ancestors 'none'"
+        },
+        {
+          "key": "Strict-Transport-Security",
+          "value": "max-age=63072000; includeSubDomains; preload"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        },
+        {
+          "key": "X-Frame-Options",
+          "value": "DENY"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "Permissions-Policy",
+          "value": "camera=(), microphone=(), geolocation=(), payment=(), usb=(), bluetooth=(), serial=(), interest-cohort=()"
+        },
+        {
+          "key": "Cross-Origin-Opener-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "Cross-Origin-Resource-Policy",
+          "value": "same-origin"
+        },
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow, noarchive"
+        }
+      ]
+    }
+  ]
+}

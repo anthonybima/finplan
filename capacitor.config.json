@@ -1,0 +1,6 @@
+{
+  "appId": "com.finplan.personal",
+  "appName": "FinPlan",
+  "webDir": "dist",
+  "plugins": { "CapacitorHttp": { "enabled": true } }
+}
