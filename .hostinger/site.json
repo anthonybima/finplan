@@ -1,0 +1,8 @@
+{
+  "domain": "finplan.bimabearing.cloud",
+  "vps": 2149524,
+  "type": "docker",
+  "project": "finplan",
+  "compose": "deploy/docker-compose.vps.yml",
+  "source_branch": "site"
+}
