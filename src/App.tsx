@@ -41,10 +41,10 @@ import { useViewMode } from './lib/viewMode';
 export type Page = 'home' | 'markets' | 'recap' | 'txns' | 'plan' | 'wealth' | 'connections' | 'analyst' | 'risk' | 'advice' | 'ask' | 'news' | 'weekly' | 'settings';
 export interface ViewProps { data: AppData; update: (fn: (d: AppData) => AppData) => void; go: (p: Page) => void; openImport?: (what?: 'auto' | 'accounts' | 'portfolio') => void; askClaude?: (question: string) => void; enterBalances?: (ids: string[]) => void }
 
-const NAV: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
+const NAV: { id: Page; label: string; short?: string; icon: typeof LayoutDashboard }[] = [
   { id: 'home', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'markets', label: 'Markets', icon: CandlestickChart },
-  { id: 'recap', label: 'Market recap', icon: Activity },
+  { id: 'recap', label: 'Market recap', short: 'Recap', icon: Activity },
   { id: 'txns', label: 'Transactions', icon: ArrowLeftRight },
   { id: 'plan', label: 'Plan & Goals', icon: Target },
   { id: 'wealth', label: 'Wealth', icon: Wallet },
@@ -57,7 +57,7 @@ const NAV: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'weekly', label: 'Weekly review', icon: CalendarCheck },
   { id: 'settings', label: 'Settings', icon: Cog },
 ];
-const MOBILE: Page[] = ['home', 'markets', 'txns', 'plan'];
+const MOBILE: Page[] = ['home', 'markets', 'recap', 'wealth'];
 
 export interface AppProps { session: Session; initial: AppData | null; persist: (d: AppData | null) => void; onLock: () => void; onSignOut: () => void }
 
@@ -192,7 +192,7 @@ export default function App({ session, initial, persist, onLock, onSignOut }: Ap
       {page !== 'ask' && <button className="fab" onClick={() => setQuickAdd(true)} aria-label="Add transaction"><Plus size={26} /></button>}
       <nav className="bottom-nav">
         {MOBILE.map((id) => { const n = NAV.find((x) => x.id === id)!; return (
-          <button key={id} className={page === id ? 'active' : ''} onClick={() => go(id)}><span className="ico-wrap"><n.icon size={21} />{id === 'home' && monthlyDue && <span className="dot" />}</span>{n.label.split(' ')[0]}</button>
+          <button key={id} className={page === id ? 'active' : ''} onClick={() => go(id)}><span className="ico-wrap"><n.icon size={21} />{id === 'home' && monthlyDue && <span className="dot" />}</span>{n.short || n.label.split(' ')[0]}</button>
         ); })}
         <button className={!MOBILE.includes(page) ? 'active' : ''} onClick={() => setSheet(true)}><Menu size={21} />More</button>
       </nav>
