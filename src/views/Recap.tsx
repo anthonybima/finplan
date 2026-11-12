@@ -35,8 +35,9 @@ export default function Recap(_: ViewProps) {
   const rc = useMemo(() => buildRecap(series, period), [series, period]);
   const ll = useMemo(() => REGIONS.map((g) => ({ name: g.name, rows: g.pairs.filter(([, i, e]) => series[i]?.length && series[e]?.length).map(([m, i, e]) => leadLag(m, i, e, series[i], offs[i] ?? 0, series[e], offs[e] ?? 0)) })), [series, offs]);
   const have = syms.length - rc.missing.length;
-  const leaders = ll.flatMap((g) => g.rows).filter((r) => (r.nextDay ?? 0) >= 0.3).sort((x, y) => y.nextDay! - x.nextDay!);
-  const leadNote = leaders.length ? `MSCI funds lead the next local session most in ${leaders.slice(0, 4).map((r) => `${r.market} (${r.nextDay!.toFixed(2)}, +1% → ${pct((r.beta ?? 0) / 100, 2)})`).join(', ')}; see Lead–lag below.` : ll.some((g) => g.rows.length) ? 'No market shows a meaningful next-session lead from its MSCI fund over the last year.' : '';
+  const llRows = ll.flatMap((g) => g.rows);
+  const byV = (v: string) => llRows.filter((r) => r.verdict === v).map((r) => r.market);
+  const leadNote = llRows.length ? `Lead–lag (12 months, every day): index follows MSCI next day in ${byV('Index follows MSCI next day').join(', ') || 'none'}; move together same day in ${byV('Move together same day').join(', ') || 'none'}${byV('MSCI follows index next day').length ? `; MSCI follows the index in ${byV('MSCI follows index next day').join(', ')}` : ''}${byV('Weak link').length ? `; weak link in ${byV('Weak link').join(', ')}` : ''}.` : '';
   const top = rc.movers.slice(0, 6), bottom = rc.movers.slice(-6).reverse();
   const maxAbs = Math.max(0.0001, ...rc.movers.map((m) => Math.abs(m.r)));
   const heatRows = REGIONS.flatMap((g) => g.pairs.map(([market, idx]) => ({ market, sym: idx, s: series[idx] ? lastSessions(series[idx], 5) : [] }))).filter((r) => r.s.length);
@@ -101,26 +102,28 @@ export default function Recap(_: ViewProps) {
         </Card>
       ))}
 
-      <Card title="Lead–lag: does the MSCI fund move before the local index?">
-        <div className="small muted" style={{ marginBottom: 8 }}>The MSCI fund trades in New York, after Asian markets close (and partly after Europe), so its move can show up in the local index on the <b>next</b> session. Last 12 months of daily closes, matched by each market's own date.</div>
+      <Card title="Lead–lag: same day, or one follows the other next day?">
+        <div className="small muted" style={{ marginBottom: 8 }}>Every trading day of the last 12 months, any size of move. The MSCI fund trades in New York after Asia closes (and partly after Europe), sessions matched by each market's own date. Each cell: <b>correlation</b> (−1…1) · <b>share of days moving the same direction</b> (50% = coin flip).</div>
         {ll.map((g) => g.rows.length > 0 && (
           <div key={g.name} style={{ overflowX: 'auto', marginBottom: 10 }}>
             <table className="table">
-              <thead><tr><th>{g.name}</th><th style={{ textAlign: 'right' }} title="Correlation of the index and the fund on the same date">Same day</th><th style={{ textAlign: 'right' }} title="Correlation of the fund's move with the index's next session">Next session</th><th style={{ textAlign: 'right' }}>MSCI +1% → index next</th><th style={{ textAlign: 'right' }}>Followed on ≥1% days</th><th style={{ textAlign: 'right' }}>Next-session signal</th></tr></thead>
+              <thead><tr><th>{g.name}</th><th>Verdict</th><th style={{ textAlign: 'right' }}>Same day</th><th style={{ textAlign: 'right' }}>Index next day ← MSCI</th><th style={{ textAlign: 'right' }}>MSCI next day ← index</th><th style={{ textAlign: 'right' }}>MSCI +1% → index next</th><th style={{ textAlign: 'right' }}>Next-session signal</th></tr></thead>
               <tbody>{g.rows.map((r) => {
-                const strong = (r.nextDay ?? 0) >= 0.3;
+                const cell = (c: number | null, d: number | null, hi: boolean) => <span className={hi ? 'pill good' : ''} style={{ fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' }}>{c == null ? '–' : c.toFixed(2)} · {d == null ? '–' : `${Math.round(d * 100)}%`}</span>;
+                const v = r.verdict;
                 return <tr key={r.market}>
-                  <td><b>{r.market}</b><div className="small muted">{r.etf} → {findInstrument(r.index).name.replace(/ \(.*\)$/, '')} · {r.n} sessions</div></td>
-                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.sameDay == null ? '–' : r.sameDay.toFixed(2)}</td>
-                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}><span className={strong ? 'pill good' : ''}>{r.nextDay == null ? '–' : r.nextDay.toFixed(2)}</span></td>
+                  <td><b>{r.market}</b><div className="small muted">{findInstrument(r.index).name.replace(/ \(.*\)$/, '')} · {r.etf} · {r.n} sessions</div></td>
+                  <td><span className={`pill ${v === 'Weak link' ? '' : v === 'Index follows MSCI next day' ? 'warn' : 'good'}`} style={{ fontSize: 11, whiteSpace: 'nowrap' }}>{v}</span></td>
+                  <td style={{ textAlign: 'right' }}>{cell(r.sameDay, r.sameDir, v === 'Move together same day')}</td>
+                  <td style={{ textAlign: 'right' }}>{cell(r.nextDay, r.nextDir, v === 'Index follows MSCI next day')}</td>
+                  <td style={{ textAlign: 'right' }}>{cell(r.reverse, r.reverseDir, v === 'MSCI follows index next day')}</td>
                   <td style={{ textAlign: 'right' }}>{r.beta == null ? '–' : <P r={r.beta / 100} />}</td>
-                  <td style={{ textAlign: 'right' }}>{r.hit == null ? '–' : `${Math.round(r.hit * 100)}% of ${r.bigDays}`}</td>
-                  <td style={{ textAlign: 'right' }}>{r.signal && strong ? <span title={`MSCI ${pct(r.signal.etf)} on ${r.signal.date}`}>MSCI <P r={r.signal.etf} /> → index ≈ <b><P r={r.signal.expected} /></b></span> : <span className="small muted">–</span>}</td>
+                  <td style={{ textAlign: 'right' }}>{r.signal && v === 'Index follows MSCI next day' ? <span title={`MSCI ${pct(r.signal.etf)} on ${r.signal.date}`}>MSCI <P r={r.signal.etf} /> → index ≈ <b><P r={r.signal.expected} /></b></span> : <span className="small muted">–</span>}</td>
                 </tr>;
               })}</tbody>
             </table>
           </div>))}
-        <div className="small muted">How to read it: <b>Next session</b> near 0 = no lead; 0.3+ = the MSCI move tends to carry into the index the next session (highlighted). <b>MSCI +1% → index next</b> is the average follow-through (e.g. +0.40% means a +1% MSCI day is followed by about +0.4% in the index). The signal is shown only where the lead is meaningful, and it's a statistical tendency, not a forecast.</div>
+        <div className="small muted"><b>Move together same day</b>: the fund mostly mirrors the index's own session (for Asia: New York prices in what the local market just did). <b>Index follows MSCI next day</b>: the fund's move tends to show up in the local index the next session; <b>MSCI +1% → index next</b> is the average size of that follow-through. <b>MSCI follows index next day</b>: the reverse. <b>Weak link</b>: no reliable pattern. A tendency over the past year, not a forecast.</div>
       </Card>
 
       <Card title="Day by day: last 5 sessions (local index, daily % change)">

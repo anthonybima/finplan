@@ -139,29 +139,29 @@ function corr(x: number[], y: number[]) {
   let sxy = 0, sxx = 0, syy = 0; for (let i = 0; i < n; i++) { const a = x[i] - mx, b = y[i] - my; sxy += a * b; sxx += a * a; syy += b * b; }
   return sxx && syy ? { r: sxy / Math.sqrt(sxx * syy), beta: sxy / sxx, n } : null;
 }
+export type LagVerdict = 'Index follows MSCI next day' | 'Move together same day' | 'MSCI follows index next day' | 'Weak link';
 export interface LeadLag {
   market: string; index: string; etf: string; n: number;
-  sameDay: number | null;   // corr(index d, MSCI d): MSCI reacting to the index session that closed before it
-  nextDay: number | null;   // corr(MSCI d, index next session): MSCI leading the index
-  beta: number | null;      // index next session ≈ beta × MSCI move
-  hit: number | null; bigDays: number; // on days MSCI moved ≥ 1%: share where the index followed in the same direction
-  follow: number | null;    // average index next-session move per +1% MSCI move on those big days
+  sameDay: number | null; sameDir: number | null;     // index d vs MSCI d: correlation, share of days moving the same way
+  nextDay: number | null; nextDir: number | null;     // MSCI d vs index next session
+  reverse: number | null; reverseDir: number | null;  // index d vs MSCI next session
+  beta: number | null;                                // index next session ≈ beta × MSCI move (all days)
+  verdict: LagVerdict;
   signal: { date: string; etf: number; expected: number } | null; // latest MSCI session the index hasn't traded after yet
 }
+const dirShare = (pairs: [number, number][]) => { const v = pairs.filter(([a, b]) => a && b); return v.length >= 20 ? v.filter(([a, b]) => Math.sign(a) === Math.sign(b)).length / v.length : null; };
 export function leadLag(market: string, index: string, etf: string, idxPts: Pt[], idxOff: number, etfPts: Pt[], etfOff: number): LeadLag {
   const I = dailyByDate(idxPts, idxOff), E = dailyByDate(etfPts, etfOff);
-  const idxDates = [...I.keys()].sort();
-  const nextIdx = (d: string) => { for (const k of idxDates) if (k > d) return k; return null; };
-  const same: [number, number][] = [], lead: [number, number][] = [];
-  for (const [d, e] of E) {
-    const i = I.get(d); if (i != null) same.push([i, e]);
-    const k = nextIdx(d); if (k) lead.push([e, I.get(k)!]);
-  }
-  const cs = corr(same.map((x) => x[0]), same.map((x) => x[1])), cl = corr(lead.map((x) => x[0]), lead.map((x) => x[1]));
-  const big = lead.filter(([e]) => Math.abs(e) >= 0.01);
-  const hit = big.length ? big.filter(([e, i]) => Math.sign(e) === Math.sign(i)).length / big.length : null;
-  const follow = big.length ? big.reduce((s, [e, i]) => s + i / e, 0) / big.length : null;
-  const lastE = [...E.keys()].sort().at(-1), lastI = idxDates.at(-1);
+  const after = (m: Map<string, number>) => { const ks = [...m.keys()].sort(); return (d: string) => ks.find((k) => k > d) ?? null; };
+  const nextI = after(I), nextE = after(E);
+  const same: [number, number][] = [], lead: [number, number][] = [], rev: [number, number][] = [];
+  for (const [d, e] of E) { const i = I.get(d); if (i != null) same.push([i, e]); const k = nextI(d); if (k) lead.push([e, I.get(k)!]); }
+  for (const [d, i] of I) { const k = nextE(d); if (k) rev.push([i, E.get(k)!]); }
+  const c = (p: [number, number][]) => corr(p.map((x) => x[0]), p.map((x) => x[1]));
+  const cs = c(same), cl = c(lead), cr = c(rev);
+  const sd = cs?.r ?? 0, nd = cl?.r ?? 0, rd = cr?.r ?? 0;
+  const verdict: LagVerdict = nd >= 0.3 && nd >= sd ? 'Index follows MSCI next day' : sd >= 0.4 ? 'Move together same day' : rd >= 0.3 ? 'MSCI follows index next day' : nd >= 0.3 ? 'Index follows MSCI next day' : 'Weak link';
+  const lastE = [...E.keys()].sort().at(-1), lastI = [...I.keys()].sort().at(-1);
   const signal = lastE && lastI && lastE >= lastI && cl ? { date: lastE, etf: E.get(lastE)!, expected: cl.beta * E.get(lastE)! } : null;
-  return { market, index, etf, n: lead.length, sameDay: cs?.r ?? null, nextDay: cl?.r ?? null, beta: cl?.beta ?? null, hit, bigDays: big.length, follow, signal };
+  return { market, index, etf, n: lead.length, sameDay: cs?.r ?? null, sameDir: dirShare(same), nextDay: cl?.r ?? null, nextDir: dirShare(lead), reverse: cr?.r ?? null, reverseDir: dirShare(rev), beta: cl?.beta ?? null, verdict, signal };
 }
