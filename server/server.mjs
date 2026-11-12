@@ -461,4 +461,4 @@ http.createServer((req, res) => {
     if (status === 500) console.error(e);
     if (!res.headersSent) send(res, status, { error: status === 500 ? 'Server error' : e.message });
   });
-}).listen(PORT, () => console.log(`FinPlan Cloud on :${PORT} · ${Object.keys(users).length} account(s) · sign-up: ${ALLOWED.length ? 'allow-list' : SIGNUP}`));
+}).listen(PORT, () => { yahooChart('^GDAXI', '5d', '1d', 'selfcheck').then((r) => { let px = ''; try { px = JSON.parse(r.body).chart.result[0].meta.regularMarketPrice; } catch { /* */ } console.log(`market data self-check: Yahoo ${r.status} · DAX ${px || 'n/a'}`); }).catch((e) => console.log(`market data self-check failed: ${e.message}`)); console.log(`FinPlan Cloud on :${PORT} · ${Object.keys(users).length} account(s) · sign-up: ${ALLOWED.length ? 'allow-list' : SIGNUP}`); });
