@@ -137,6 +137,35 @@ function signupAllowed(email) {
   return false;
 }
 
+/* ------------------------------------------------------------------ market data (Yahoo Finance chart API, server-side: no CORS, cached) */
+const MARKET_CACHE = new Map(); // key → {at, status, body}
+const RANGES = new Set(['1d', '5d', '1mo', '3mo', '6mo', 'ytd', '1y', '5y']);
+const INTERVALS = new Set(['2m', '5m', '15m', '30m', '60m', '1h', '1d', '1wk']);
+/** Yahoo chart JSON for one symbol, cached: {status, body}. Shared by /api/market/chart (website) and the market_chart MCP tool (FinPlan in Claude). */
+async function yahooChart(sym, range = '1mo', interval = '1d', ip = '') {
+  if (!/^[A-Za-z0-9^=.\-]{1,20}$/.test(sym)) throw new HttpError(400, 'Bad symbol');
+  if (!RANGES.has(range) || !INTERVALS.has(interval)) throw new HttpError(400, 'Bad range');
+  const key = `${sym}|${range}|${interval}`; const hit = MARKET_CACHE.get(key);
+  const ttl = range === '1d' ? 60e3 : range === '5d' ? 300e3 : 1800e3;
+  if (hit && Date.now() - hit.at < ttl) return hit;
+  if (limited(`mk:${ip}`, 240, 60e3)) throw new HttpError(429, 'Too many requests');
+  let status = 502, body = JSON.stringify({ chart: { result: null, error: { description: 'Market data unavailable' } } });
+  for (const base of (process.env.YAHOO_BASES || 'https://query1.finance.yahoo.com,https://query2.finance.yahoo.com').split(',')) {
+    try {
+      const r = await fetch(`${base}/v8/finance/chart/${encodeURIComponent(sym)}?range=${range}&interval=${interval}&includePrePost=false`, { headers: { 'User-Agent': 'Mozilla/5.0 (FinPlan personal dashboard)', Accept: 'application/json' }, signal: AbortSignal.timeout(8000) });
+      const t = await r.text();
+      if (r.ok || r.status === 404) { status = r.status; body = t; break; }
+    } catch { /* try next host */ }
+  }
+  const out = { at: Date.now(), status, body };
+  if (status === 200 || status === 404) { MARKET_CACHE.set(key, out); if (MARKET_CACHE.size > 2000) MARKET_CACHE.delete(MARKET_CACHE.keys().next().value); }
+  return out;
+}
+async function marketChart(res, sym, q, ip) {
+  const r = await yahooChart(sym, q.get('range') || '1mo', q.get('interval') || '1d', ip);
+  res.writeHead(r.status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(r.body);
+}
+
 async function putFile(uid, id, b) {
   if (typeof b.body !== 'string' || !b.body) throw new HttpError(400, 'Empty file');
   if (id && !FILE_ID.test(id)) throw new HttpError(404, 'Not found');
@@ -302,6 +331,7 @@ const MCP_TOOLS = [
   { name: 'list_sync_copies', title: 'List encrypted FinPlan copies', description: 'Lists the end-to-end encrypted FinPlan sync copies (one per FinPlan user): id, name, modifiedTime, size, appProperties {rev, device, user, accountName}. The contents are ciphertext only.', inputSchema: { type: 'object', properties: {} }, annotations: { readOnlyHint: true } },
   { name: 'read_sync_copy', title: 'Read an encrypted copy (in parts)', description: 'Returns part of an encrypted copy: {size, offset, data}. Call with offset 0, then offset+data.length until offset reaches size. Max 200000 characters per call.', inputSchema: { type: 'object', properties: { id: { type: 'string' }, offset: { type: 'integer', minimum: 0 }, length: { type: 'integer', minimum: 1, maximum: 200000 } }, required: ['id'] }, annotations: { readOnlyHint: true } },
   { name: 'write_sync_copy', title: 'Save an encrypted copy (in parts)', description: 'Uploads an encrypted copy in parts of at most 200000 characters. First call: no upload_id (one is returned). Last call: done=true with appProperties, optional name, and id to overwrite an existing copy (omit id to create one). Returns the saved copy\'s metadata.', inputSchema: { type: 'object', properties: { upload_id: { type: 'string' }, data: { type: 'string', maxLength: 200000 }, done: { type: 'boolean' }, id: { type: 'string' }, name: { type: 'string' }, appProperties: { type: 'object', additionalProperties: { type: 'string' } } }, required: ['data'] }, annotations: { readOnlyHint: false, destructiveHint: false } },
+  { name: 'market_chart', title: 'Market chart data', description: 'Price history for one market symbol (Yahoo Finance symbols, e.g. ^JKSE, ^N225, ^GDAXI, EIDO, GC=F): returns Yahoo chart JSON {chart:{result:[{meta, timestamp, indicators}]}}. range: 1d 5d 1mo 3mo 6mo ytd 1y 5y; interval: 5m 30m 1d 1wk.', inputSchema: { type: 'object', properties: { symbol: { type: 'string' }, range: { type: 'string' }, interval: { type: 'string' } }, required: ['symbol'] }, annotations: { readOnlyHint: true } },
   { name: 'delete_sync_copy', title: 'Delete an encrypted copy', description: 'Deletes one encrypted copy by id.', inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] }, annotations: { readOnlyHint: false, destructiveHint: true } },
 ];
 async function mcpTool(uid, email, name, a = {}) {
@@ -324,6 +354,7 @@ async function mcpTool(uid, email, name, a = {}) {
     uploads.delete(a.upload_id);
     return { upload_id: a.upload_id, file: await putFile(uid, a.id || undefined, { body: up.parts.join(''), name: a.name, appProperties: a.appProperties }) };
   }
+  if (name === 'market_chart') { const r = await yahooChart(String(a.symbol || ''), a.range || '1mo', a.interval || '1d', `mcp:${uid}`); if (r.status !== 200) throw new HttpError(r.status, 'No market data for this symbol'); return JSON.parse(r.body); }
   if (name === 'delete_sync_copy') { if (!FILE_ID.test(String(a.id || ''))) throw new HttpError(404, 'No such copy'); await fs.rm(fileOf(uid, a.id), { force: true }); return { ok: true }; }
   throw new HttpError(404, `Unknown tool ${name}`);
 }
@@ -369,6 +400,8 @@ async function handle(req, res) {
 
   if (p === '/mcp' || p === '/mcp/') return handleMcp(req, res);
   if (p.startsWith('/oauth/') || p.startsWith('/.well-known/')) { const r = await handleOAuth(req, res, p, m, ip); if (r !== null) return r; throw new HttpError(404, 'Not found'); }
+  const mk = /^\/api\/market\/chart\/([^/]+)$/.exec(p);
+  if (mk && m === 'GET') return marketChart(res, decodeURIComponent(mk[1]), url.searchParams, ip);
   if (p === '/api/health') return send(res, 200, { ok: true, signup: Object.keys(users).length === 0 || SIGNUP === 'open' || ALLOWED.length > 0 });
 
   if (m === 'POST' && (p === '/api/signup' || p === '/api/login')) {

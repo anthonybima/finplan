@@ -1,3 +1,4 @@
+import { serverAvailable } from './serverCloud';
 import { getJSON, request } from './net';
 import { getJSONSecret } from './secure';
 import type { AlpacaCreds } from './alpaca';
@@ -38,7 +39,12 @@ export function clearMarketCache() { cache.clear(); }
 /* ---------- Yahoo ---------- */
 async function yahoo(sym: string, rk: RangeKey): Promise<Series> {
   const { range, interval } = YR[rk];
-  const j = await limited(() => getJSON<any>(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=${range}&interval=${interval}&includePrePost=false`, { timeoutMs: 10000 }));
+  const qs = `${encodeURIComponent(sym)}?range=${range}&interval=${interval}`;
+  const j = await limited(() => (serverAvailable() // website: FinPlan's own server fetches Yahoo (no CORS proxy)
+    ? fetch(`/api/market/chart/${qs}`, { cache: 'no-store' }).then((r) => r.json())
+    : (window as any).claude // inside Claude: the same server through the FinPlan Cloud connector
+    ? connectorChart(sym, range, interval)
+    : getJSON<any>(`https://query1.finance.yahoo.com/v8/finance/chart/${qs}&includePrePost=false`, { timeoutMs: 10000 })));
   const r = j?.chart?.result?.[0];
   if (!r) throw new Error(j?.chart?.error?.description || 'No data');
   const m = r.meta || {}, q = r.indicators?.quote?.[0] || {}, ts: number[] = r.timestamp || [];
@@ -53,6 +59,22 @@ async function yahoo(sym: string, rk: RangeKey): Promise<Series> {
     rangeChangePct: first ? price / first - 1 : null, points, currency: m.currency,
     dayHigh: m.regularMarketDayHigh, dayLow: m.regularMarketDayLow, updatedAt: (m.regularMarketTime || Date.now() / 1000) * 1000, source: 'Yahoo Finance',
   };
+}
+
+/* ---------- Yahoo data through the FinPlan Cloud connector (inside Claude) ---------- */
+let connectorMarketOff = false; // connector not added: stop asking until reload
+async function connectorChart(sym: string, range: string, interval: string) {
+  if (connectorMarketOff) throw new Error(USE_TV);
+  const mcp = await connectorAvailable(); if (!mcp) { connectorMarketOff = true; throw new Error(USE_TV); }
+  try {
+    const r = await mcp.callTool('FinPlan Cloud', 'market_chart', { symbol: sym, range, interval }, { cache: { staleTime: range === '1d' ? 60_000 : 900_000, gcTime: 1_800_000 } });
+    const p = typeof r?.payload === 'string' ? JSON.parse(r.payload) : r?.payload;
+    if (!p?.chart) throw new Error('No data');
+    return p;
+  } catch (e: any) {
+    if (/server_not_connected|not_granted|auth|revoked|consent/i.test(String(e?.code || e?.message || ''))) connectorMarketOff = true;
+    throw e;
+  }
 }
 
 /* ---------- Pluang via Claude connector (published artifact only) ---------- */
@@ -227,10 +249,11 @@ export function getSeries(sym: string, rk: RangeKey, force = false, source: Data
     if (source === 'alpaca') return alpacaSeries(sym, rk);
     if (source === 'pluang') { if (!pluangCan(sym)) throw new Error(`${sym} isn't on Pluang`); return pluangSeries(sym, rk); }
     if (source === 'yahoo') return yahoo(sym, rk);
-    // Auto: Pluang first, then TradingView (the UI swaps in TradingView's live chart on USE_TV)
+    // Auto: Pluang first, then (website) Yahoo Finance through FinPlan's server, then TradingView's live chart (USE_TV)
     if (pluangCan(sym) && (await pluangAvailable())) {
-      try { return await pluangSeries(sym, rk); } catch { throw new Error(USE_TV); }
+      try { return await pluangSeries(sym, rk); } catch { /* next */ }
     }
+    if (serverAvailable() || ((window as any).claude && !connectorMarketOff)) { try { return await yahoo(sym, rk); } catch { /* next */ } }
     throw new Error(USE_TV);
   })();
   cache.set(key, { at: Date.now(), p });

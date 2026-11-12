@@ -3,7 +3,7 @@ import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, RefreshCw, ExternalLink, Chec
 import type { ViewProps } from '../App';
 import type { MarketDashboard, Widget } from '../lib/types';
 import { alpacaCan, clearMarketCache, connectorAvailable, getRatio, getSeries, isIdx, pluangAvailable, pluangCan, RANGES, USE_TV, type DataSource, type RangeKey, type Series } from '../lib/market';
-import { ALGOBARS_URL, ASIA_MSCI, CATALOG, findInstrument, GROUPS, idxCode, investingChartUrl, stockbitUrl } from '../lib/marketCatalog';
+import { ALGOBARS_URL, ASIA_MSCI, EUROPE_MSCI, tvWidgetOk, type MsciPair, CATALOG, findInstrument, GROUPS, idxCode, investingChartUrl, stockbitUrl } from '../lib/marketCatalog';
 import { uid } from '../lib/store';
 import { platform } from '../lib/net';
 import { Field, Modal, Seg, toast } from '../components/ui';
@@ -12,14 +12,17 @@ import TVWidget from '../components/TVWidget';
 
 const W = (type: Widget['type'], title: string, symbols: string[], range: RangeKey = '1D', size: Widget['size'] = 's', chart: Widget['chart'] = 'area'): Widget => ({ id: uid(), type, title, symbols, range, chart, size });
 
-export const MARKETS_LAYOUT = 2;
+export const MARKETS_LAYOUT = 3;
 const COMMODITIES: [string, string][] = [['Gold', 'GC=F'], ['Silver', 'SI=F'], ['Crude oil WTI', 'CL=F'], ['Brent crude', 'BZ=F'], ['Copper', 'HG=F'], ['Natural gas', 'NG=F'], ['Platinum', 'PL=F'], ['Wheat', 'ZW=F'], ['Coffee', 'KC=F']];
 const commoditiesDash = (): MarketDashboard => ({ id: 'commodities', name: 'Global commodities', refreshSec: 60, widgets: COMMODITIES.map(([t, sym]) => W('quote', t, [sym], '1M', 'm')) });
-const asiaDash = (): MarketDashboard => ({ id: 'asia', name: 'Asia Pacific vs MSCI', refreshSec: 60, widgets: [
-  W('list', 'Asia Pacific indices', ASIA_MSCI.map(([, idx]) => idx), '1D', 'm'),
-  W('list', 'MSCI equivalents (iShares, USD)', ASIA_MSCI.map(([, , etf]) => etf), '1D', 'm'),
-  ...ASIA_MSCI.map(([country, idx, etf]) => W('compare', `${country}: ${findInstrument(idx).name.replace(/ \(.*\)$/, '')} vs ${etf}`, [idx, etf], '1Y', 'm', 'line')),
+/** A region tab: index watchlist, MSCI ETF watchlist, then one index-vs-ETF comparison per market. */
+const vsMsciDash = (id: string, name: string, region: string, pairs: MsciPair[]): MarketDashboard => ({ id, name, refreshSec: 60, widgets: [
+  W('list', `${region} indices`, pairs.map(([, idx]) => idx), '1D', 'm'),
+  W('list', 'MSCI equivalents (iShares, USD)', pairs.map(([, , etf]) => etf), '1D', 'm'),
+  ...pairs.map(([market, idx, etf]) => W('compare', `${market}: ${findInstrument(idx).name.replace(/ \(.*\)$/, '')} vs ${etf}`, [idx, etf], '1Y', 'm', 'line')),
 ] });
+const asiaDash = () => vsMsciDash('asia', 'Asia Pacific vs MSCI', 'Asia Pacific', ASIA_MSCI);
+const europeDash = () => vsMsciDash('europe', 'Europe vs MSCI', 'European', EUROPE_MSCI);
 export function defaultDashboards(): MarketDashboard[] {
   return [{
     id: 'main', name: 'Markets', refreshSec: 60, widgets: [
@@ -28,7 +31,7 @@ export function defaultDashboards(): MarketDashboard[] {
       W('quote', 'RSP (Equal-weight S&P)', ['RSP'], '1M', 'm'), W('ratio', 'RSP / SPY (breadth)', ['RSP', 'SPY'], '1Y', 'm', 'line'),
       W('list', 'Indonesia blue chips', ['BBCA.JK', 'BBRI.JK', 'BMRI.JK', 'BBNI.JK', 'TLKM.JK', 'ASII.JK', 'GOTO.JK', 'ADRO.JK', 'ANTM.JK', 'AMMN.JK'], '1D', 'm'),
     ],
-  }, commoditiesDash(), asiaDash()];
+  }, commoditiesDash(), asiaDash(), europeDash()];
 }
 /** Bring saved dashboards up to the current sample layout: IHSG → COMPOSITE IDX + EIDO; commodities and Asia Pacific get their own tabs. */
 export function upgradeDashboards(ds: MarketDashboard[]): MarketDashboard[] {
@@ -46,7 +49,7 @@ export function upgradeDashboards(ds: MarketDashboard[]): MarketDashboard[] {
     return { ...d, widgets };
   });
   if (!out.some((d) => d.id === 'commodities')) out = [...out, commoditiesDash()];
-  if (!out.some((d) => d.id === 'asia')) out = [...out, asiaDash()];
+  for (const make of [asiaDash, europeDash]) { const d = make(); if (!out.some((x) => x.id === d.id)) out = [...out, d]; }
   return out;
 }
 
@@ -110,7 +113,7 @@ const IN_CLAUDE = () => !!(window as any).claude;
 /** TradingView live chart used when Pluang doesn't cover a symbol (inside Claude TradingView can't load, so link out). */
 function TvFallback({ w, height }: { w: Widget; height: number }) {
   const sym = tvOf(w);
-  if (IN_CLAUDE()) return <div className="small muted" style={{ padding: '14px 0' }}>Not on Pluang. The TradingView chart loads in the FinPlan app.<div><a href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(sym)}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Open {sym} on TradingView ↗</a></div></div>;
+  if (IN_CLAUDE() || !sym.split('/').every(tvWidgetOk)) return <div className="small muted" style={{ padding: '14px 0' }}>{IN_CLAUDE() ? 'Not on Pluang. The TradingView chart loads in the FinPlan app.' : 'Chart data unavailable right now.'}<div><a href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(sym)}`} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>Open {sym} on TradingView ↗</a></div></div>;
   return (
     <div onClick={(e) => e.stopPropagation()}>
       {w.type === 'ratio'
@@ -188,8 +191,8 @@ function CompareTile({ w, tick, onOpenSym, editTools }: { w: Widget; tick: numbe
           <path d={geo.pb} fill="none" stroke={colors[1]} strokeWidth="2" vectorEffect="non-scaling-stroke" />
         </svg>
         <div className="small muted" style={{ fontSize: 11, marginTop: 4 }}>Gap {pctTxt(geo.ra - geo.rbv)} over {w.range} · index in local currency, ETF in USD (the gap includes the currency move)</div>
-      </>) : tvFallback ? (IN_CLAUDE()
-        ? <div className="small muted" style={{ padding: '14px 0' }}>The comparison chart loads in the FinPlan app. <a href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSym(a))}`} target="_blank" rel="noreferrer">{tvSym(a)}</a> · <a href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSym(b))}`} target="_blank" rel="noreferrer">{tvSym(b)}</a> on TradingView ↗</div>
+      </>) : tvFallback ? (IN_CLAUDE() || !tvWidgetOk(tvSym(a)) || !tvWidgetOk(tvSym(b))
+        ? <div className="small muted" style={{ padding: '14px 0' }}>{IN_CLAUDE() ? 'The comparison chart loads in the FinPlan app.' : 'Comparison data unavailable right now.'} <a href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSym(a))}`} target="_blank" rel="noreferrer">{tvSym(a)}</a> · <a href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSym(b))}`} target="_blank" rel="noreferrer">{tvSym(b)}</a> on TradingView ↗</div>
         : <div style={{ marginTop: 8 }}><TVWidget type="advanced-chart" height={300} config={{ symbol: tvSym(a), compareSymbols: [{ symbol: tvSym(b), position: 'SameScale' }], interval: 'D', range: tvRange(w.range), style: '2', hide_top_toolbar: true, hide_legend: false, allow_symbol_change: false, hide_volume: true, autosize: true, support_host: 'https://www.tradingview.com' }} />
             <div className="small muted" style={{ fontSize: 11 }}>TradingView · % change, same scale</div></div>)
       : (err[a] || err[b]) ? <div className="small muted" style={{ padding: '18px 0' }}>{errText(err[a] || err[b], a)}</div>
@@ -219,10 +222,13 @@ function ListTile({ w, tick, onOpenSym, editTools }: { w: Widget; tick: number; 
       {(() => {
         const tv = w.symbols.filter((sym) => err[sym] === USE_TV);
         if (!tv.length) return null;
-        if (IN_CLAUDE()) return <div className="small muted" style={{ paddingTop: 8 }}>Not on Pluang (TradingView loads in the app): {tv.map((sym, i) => <span key={sym}>{i ? ' · ' : ''}<a href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(findInstrument(sym).tv || sym)}`} target="_blank" rel="noreferrer">{findInstrument(sym).name}</a></span>)}</div>;
-        return <div style={{ marginTop: 6 }}><TVWidget type="market-quotes" height={Math.min(560, 70 + tv.length * 52)} config={{ width: '100%', height: '100%', showSymbolLogo: true,
-          symbolsGroups: [{ name: w.title, symbols: tv.map((sym) => ({ name: findInstrument(sym).tv || sym, displayName: findInstrument(sym).name })) }] }} />
-          <div className="small muted" style={{ fontSize: 11 }}>{tv.length < w.symbols.length ? 'Rows above: Pluang · below: ' : ''}TradingView live widget</div></div>;
+        const links = (list: string[], label: string) => <div className="small muted" style={{ paddingTop: 8 }}>{label}: {list.map((sym, i) => <span key={sym}>{i ? ' · ' : ''}<a href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(findInstrument(sym).tv || sym)}`} target="_blank" rel="noreferrer">{findInstrument(sym).name}</a></span>)}</div>;
+        if (IN_CLAUDE()) return links(tv, 'Not on Pluang (TradingView loads in the app)');
+        const bad = tv.filter((sym) => !tvWidgetOk(findInstrument(sym).tv)); const okTv = tv.filter((sym) => tvWidgetOk(findInstrument(sym).tv));
+        if (!okTv.length) return links(bad, 'Data unavailable right now, open on TradingView');
+        return <div style={{ marginTop: 6 }}>{bad.length > 0 && links(bad, 'Open on TradingView')}<TVWidget type="market-quotes" height={Math.min(560, 70 + tv.length * 52)} config={{ width: '100%', height: '100%', showSymbolLogo: true,
+          symbolsGroups: [{ name: w.title, symbols: okTv.map((sym) => ({ name: findInstrument(sym).tv || sym, displayName: findInstrument(sym).name })) }] }} />
+          <div className="small muted" style={{ fontSize: 11 }}>{okTv.length < w.symbols.length ? 'Rows above: Pluang · below: ' : ''}TradingView live widget</div></div>;
       })()}
     </div>
   );
@@ -294,7 +300,7 @@ export default function Markets({ data, update }: ViewProps) {
 
       {!hasPluang && !inClaude && (
         <div className="banner small" style={{ background: 'var(--tip-soft)' }}>
-          <div className="grow">Charts use <b>Pluang first, then TradingView</b>. Sign in with Pluang (Connections → Pluang, desktop app) to chart IDX/US stocks and crypto from Pluang data; until then TradingView live charts are shown.</div>
+          <div className="grow">Charts use <b>Pluang first, then Yahoo Finance</b> (through FinPlan's server; inside Claude through the FinPlan Cloud connector), then TradingView. Sign in with Pluang (Connections → Pluang, desktop app) to chart IDX/US stocks and crypto from Pluang data.</div>
         </div>
       )}
       {inClaude && (
@@ -411,7 +417,7 @@ function WidgetEditor({ w, inClaude, onClose, onSave }: { w?: Widget; inClaude: 
         {x.type !== 'list' && <Field label="Chart style"><select className="input" value={x.chart} onChange={(e) => set({ chart: e.target.value as Widget['chart'] })}><option value="area">Area</option><option value="line">Line</option><option value="candle">Candles</option></select></Field>}
         <Field label="Size"><select className="input" value={x.size} onChange={(e) => set({ size: e.target.value as Widget['size'] })}><option value="s">Small</option><option value="m">Medium</option><option value="l">Large</option></select></Field>
         <Field label="Data source"><select className="input" value={x.source || 'auto'} onChange={(e) => set({ source: e.target.value as Widget['source'] })}>
-          <option value="auto">Auto: Pluang first, then TradingView</option><option value="pluang">Pluang only</option><option value="yahoo">Yahoo Finance</option>
+          <option value="auto">Auto: Pluang, then Yahoo Finance, then TradingView</option><option value="pluang">Pluang only</option><option value="yahoo">Yahoo Finance</option>
           <option value="alpaca">Alpaca Markets (US stocks/ETFs, crypto)</option></select></Field>
         {x.type === 'quote' && <Field label="Chart drawn by"><select className="input" value={x.view || 'native'} onChange={(e) => set({ view: e.target.value as Widget['view'] })}>
           <option value="native">FinPlan (uses the data source)</option><option value="tradingview">TradingView live widget</option><option value="investing">Investing.com live chart</option></select></Field>}

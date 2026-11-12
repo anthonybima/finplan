@@ -65,10 +65,10 @@ export const CATALOG: Instrument[] = [
   { sym: 'ZW=F', name: 'Wheat', group: 'Commodities', tv: 'CBOT:ZW1!', ccy: 'USD' },
   { sym: 'KC=F', name: 'Coffee', group: 'Commodities', tv: 'ICEUS:KC1!', ccy: 'USD' },
   // Asia Pacific
-  { inv: 178, sym: '^N225', name: 'Nikkei 225 (Japan)', group: 'Asia Pacific', tv: 'TVC:NI225', decimals: 2 },
-  { inv: 179, sym: '^HSI', name: 'Hang Seng (Hong Kong)', group: 'Asia Pacific', tv: 'TVC:HSI', decimals: 2 },
+  { inv: 178, sym: '^N225', name: 'Nikkei 225 (Japan)', group: 'Asia Pacific', tv: 'INDEX:NKY', decimals: 2 },
+  { inv: 179, sym: '^HSI', name: 'Hang Seng (Hong Kong)', group: 'Asia Pacific', tv: 'INDEX:HSI', decimals: 2 },
   { sym: '000001.SS', name: 'Shanghai Composite', group: 'Asia Pacific', tv: 'SSE:000001', decimals: 2 },
-  { sym: '^KS11', name: 'KOSPI (Korea)', group: 'Asia Pacific', tv: 'KRX:KOSPI', decimals: 2 },
+  { sym: '^KS11', name: 'KOSPI (Korea)', group: 'Asia Pacific', tv: 'INDEX:KSIC', decimals: 2 },
   { sym: '^STI', name: 'Straits Times (Singapore)', group: 'Asia Pacific', tv: 'TVC:STI', decimals: 2 },
   { sym: '^AXJO', name: 'ASX 200 (Australia)', group: 'Asia Pacific', tv: 'ASX:XJO', decimals: 2 },
   { sym: '^NSEI', name: 'Nifty 50 (India)', group: 'Asia Pacific', tv: 'NSE:NIFTY', decimals: 2 },
@@ -76,7 +76,19 @@ export const CATALOG: Instrument[] = [
   { sym: '^KLSE', name: 'KLCI (Malaysia)', group: 'Asia Pacific', tv: 'FTSEMYX:FBMKLCI', decimals: 2 },
   { sym: '^SET.BK', name: 'SET (Thailand)', group: 'Asia Pacific', tv: 'SET:SET', decimals: 2 },
   { sym: 'PSEI.PS', name: 'PSEi (Philippines)', group: 'Asia Pacific', tv: 'PSE:PSEI', decimals: 2 },
-  // MSCI country ETFs (US-listed, in USD): the MSCI equivalent of each Asia Pacific market
+  // Europe
+  { sym: '^STOXX50E', name: 'Euro Stoxx 50 (Eurozone)', group: 'Europe', tv: 'INDEX:SX5E', decimals: 2 },
+  { sym: '^STOXX', name: 'STOXX Europe 600', group: 'Europe', tv: 'INDEX:SXXP', decimals: 2 },
+  { sym: '^GDAXI', name: 'DAX 40 (Germany)', group: 'Europe', tv: 'INDEX:DEU40', decimals: 2 },
+  { sym: '^FCHI', name: 'CAC 40 (France)', group: 'Europe', tv: 'INDEX:CAC40', decimals: 2 },
+  { sym: '^FTSE', name: 'FTSE 100 (UK)', group: 'Europe', tv: 'FOREXCOM:UKXGBP', decimals: 2 },
+  { sym: 'FTSEMIB.MI', name: 'FTSE MIB (Italy)', group: 'Europe', tv: 'INDEX:FTSEMIB', decimals: 2 },
+  { sym: '^IBEX', name: 'IBEX 35 (Spain)', group: 'Europe', tv: 'INDEX:IBEX35', decimals: 2 },
+  { sym: '^AEX', name: 'AEX (Netherlands)', group: 'Europe', tv: 'INDEX:AEX', decimals: 2 },
+  { sym: '^SSMI', name: 'SMI (Switzerland)', group: 'Europe', tv: 'INDEX:SMI', decimals: 2 },
+  { sym: '^OMX', name: 'OMX Stockholm 30 (Sweden)', group: 'Europe', tv: 'INDEX:OMXS30', decimals: 2 },
+  { sym: '^BFX', name: 'BEL 20 (Belgium)', group: 'Europe', tv: 'INDEX:BEL20', decimals: 2 },
+  // MSCI country ETFs (US-listed, in USD): the MSCI equivalent of each market
   { sym: 'EIDO', name: 'iShares MSCI Indonesia (EIDO)', group: 'MSCI country ETFs', tv: 'AMEX:EIDO', ccy: 'USD' },
   { sym: 'EWJ', name: 'iShares MSCI Japan (EWJ)', group: 'MSCI country ETFs', tv: 'AMEX:EWJ', ccy: 'USD' },
   { sym: 'EWH', name: 'iShares MSCI Hong Kong (EWH)', group: 'MSCI country ETFs', tv: 'AMEX:EWH', ccy: 'USD' },
@@ -89,11 +101,28 @@ export const CATALOG: Instrument[] = [
   { sym: 'EWM', name: 'iShares MSCI Malaysia (EWM)', group: 'MSCI country ETFs', tv: 'AMEX:EWM', ccy: 'USD' },
   { sym: 'THD', name: 'iShares MSCI Thailand (THD)', group: 'MSCI country ETFs', tv: 'NASDAQ:THD', ccy: 'USD' },
   { sym: 'EPHE', name: 'iShares MSCI Philippines (EPHE)', group: 'MSCI country ETFs', tv: 'AMEX:EPHE', ccy: 'USD' },
+  { sym: 'IEUR', name: 'iShares Core MSCI Europe (IEUR)', group: 'MSCI country ETFs', tv: 'AMEX:IEUR', ccy: 'USD' },
+  { sym: 'EZU', name: 'iShares MSCI Eurozone (EZU)', group: 'MSCI country ETFs', tv: 'AMEX:EZU', ccy: 'USD' },
+  { sym: 'EWG', name: 'iShares MSCI Germany (EWG)', group: 'MSCI country ETFs', tv: 'AMEX:EWG', ccy: 'USD' },
+  { sym: 'EWQ', name: 'iShares MSCI France (EWQ)', group: 'MSCI country ETFs', tv: 'AMEX:EWQ', ccy: 'USD' },
+  { sym: 'EWU', name: 'iShares MSCI United Kingdom (EWU)', group: 'MSCI country ETFs', tv: 'AMEX:EWU', ccy: 'USD' },
+  { sym: 'EWI', name: 'iShares MSCI Italy (EWI)', group: 'MSCI country ETFs', tv: 'AMEX:EWI', ccy: 'USD' },
+  { sym: 'EWP', name: 'iShares MSCI Spain (EWP)', group: 'MSCI country ETFs', tv: 'AMEX:EWP', ccy: 'USD' },
+  { sym: 'EWN', name: 'iShares MSCI Netherlands (EWN)', group: 'MSCI country ETFs', tv: 'AMEX:EWN', ccy: 'USD' },
+  { sym: 'EWL', name: 'iShares MSCI Switzerland (EWL)', group: 'MSCI country ETFs', tv: 'AMEX:EWL', ccy: 'USD' },
+  { sym: 'EWD', name: 'iShares MSCI Sweden (EWD)', group: 'MSCI country ETFs', tv: 'AMEX:EWD', ccy: 'USD' },
+  { sym: 'EWK', name: 'iShares MSCI Belgium (EWK)', group: 'MSCI country ETFs', tv: 'AMEX:EWK', ccy: 'USD' },
   { sym: 'AAXJ', name: 'iShares MSCI All Country Asia ex Japan (AAXJ)', group: 'MSCI country ETFs', tv: 'NASDAQ:AAXJ', ccy: 'USD' },
 ];
 
-/** Each Asia Pacific index and its MSCI equivalent (US-listed iShares ETF), for side-by-side comparison. */
-export const ASIA_MSCI: [string, string, string][] = [
+/** Each market's index and its MSCI equivalent (US-listed iShares ETF), for side-by-side comparison: [market, index, ETF]. */
+export type MsciPair = [string, string, string];
+export const EUROPE_MSCI: MsciPair[] = [
+  ['Europe', '^STOXX', 'IEUR'], ['Eurozone', '^STOXX50E', 'EZU'], ['Germany', '^GDAXI', 'EWG'], ['France', '^FCHI', 'EWQ'],
+  ['United Kingdom', '^FTSE', 'EWU'], ['Italy', 'FTSEMIB.MI', 'EWI'], ['Spain', '^IBEX', 'EWP'], ['Netherlands', '^AEX', 'EWN'],
+  ['Switzerland', '^SSMI', 'EWL'], ['Sweden', '^OMX', 'EWD'], ['Belgium', '^BFX', 'EWK'],
+];
+export const ASIA_MSCI: MsciPair[] = [
   ['Indonesia', '^JKSE', 'EIDO'], ['Japan', '^N225', 'EWJ'], ['Hong Kong', '^HSI', 'EWH'], ['China', '000001.SS', 'MCHI'],
   ['South Korea', '^KS11', 'EWY'], ['Taiwan', '^TWII', 'EWT'], ['Singapore', '^STI', 'EWS'], ['Australia', '^AXJO', 'EWA'],
   ['India', '^NSEI', 'INDA'], ['Malaysia', '^KLSE', 'EWM'], ['Thailand', '^SET.BK', 'THD'], ['Philippines', 'PSEI.PS', 'EPHE'],
@@ -101,6 +130,9 @@ export const ASIA_MSCI: [string, string, string][] = [
 
 export const findInstrument = (sym: string): Instrument => CATALOG.find((i) => i.sym === sym)
   || (/^[A-Z0-9]{4}\.JK$/.test(sym) ? { sym, name: sym.slice(0, 4), group: 'Indonesia stocks', tv: `IDX:${sym.slice(0, 4)}`, ccy: 'IDR', decimals: 0 } : { sym, name: sym, group: 'Custom' });
+/** TradingView's free widgets only show some exchanges; for others they silently show a default symbol (AAPL). */
+const TV_WIDGET_OK = /^(INDEX|FOREXCOM|TVC|OANDA|FX_IDC|AMEX|NASDAQ|NYSE|BATS|BITSTAMP|COINBASE|BINANCE|COMEX|NYMEX|CBOT|ICEUS|SSE|IDX|BSE):/;
+export const tvWidgetOk = (tv?: string) => !!tv && TV_WIDGET_OK.test(tv) && !/^INDEX:(SXXP|FTSEMIB|IBEX35|AEX|OMXS30|BEL20)$/.test(tv);
 export const GROUPS = [...new Set(CATALOG.map((i) => i.group))];
 
 /** Investing.com official chart widget (webmaster tools). Pair IDs: Investing.com → Webmaster Tools → Technical Charts → pick a symbol → copy pair_ID from the embed code. */
