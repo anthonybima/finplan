@@ -112,6 +112,10 @@ export const CATALOG: Instrument[] = [
   { sym: 'EWL', name: 'iShares MSCI Switzerland (EWL)', group: 'MSCI country ETFs', tv: 'AMEX:EWL', ccy: 'USD' },
   { sym: 'EWD', name: 'iShares MSCI Sweden (EWD)', group: 'MSCI country ETFs', tv: 'AMEX:EWD', ccy: 'USD' },
   { sym: 'EWK', name: 'iShares MSCI Belgium (EWK)', group: 'MSCI country ETFs', tv: 'AMEX:EWK', ccy: 'USD' },
+  { sym: 'URTH', name: 'iShares MSCI World (URTH)', group: 'MSCI country ETFs', tv: 'AMEX:URTH', ccy: 'USD' },
+  { sym: 'ACWI', name: 'iShares MSCI ACWI (ACWI)', group: 'MSCI country ETFs', tv: 'NASDAQ:ACWI', ccy: 'USD' },
+  { sym: 'EEM', name: 'iShares MSCI Emerging Markets (EEM)', group: 'MSCI country ETFs', tv: 'AMEX:EEM', ccy: 'USD' },
+  { sym: 'EFA', name: 'iShares MSCI EAFE (EFA)', group: 'MSCI country ETFs', tv: 'AMEX:EFA', ccy: 'USD' },
   { sym: 'AAXJ', name: 'iShares MSCI All Country Asia ex Japan (AAXJ)', group: 'MSCI country ETFs', tv: 'NASDAQ:AAXJ', ccy: 'USD' },
 ];
 

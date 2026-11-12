@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   LayoutDashboard, ArrowLeftRight, Target, Wallet, LineChart, ShieldAlert, Sparkles, Newspaper, CalendarCheck, Settings as Cog, Plus, Menu, Plug, Lock, LogOut, CandlestickChart, Monitor, Bot,
+  Activity,
 } from 'lucide-react';
 import { useAppData } from './lib/store';
 import type { Session } from './lib/auth';
@@ -34,14 +35,16 @@ import Weekly from './views/Weekly';
 import SettingsView from './views/SettingsView';
 import Connections from './views/Connections';
 import Markets from './views/Markets';
+import Recap from './views/Recap';
 import { useViewMode } from './lib/viewMode';
 
-export type Page = 'home' | 'markets' | 'txns' | 'plan' | 'wealth' | 'connections' | 'analyst' | 'risk' | 'advice' | 'ask' | 'news' | 'weekly' | 'settings';
+export type Page = 'home' | 'markets' | 'recap' | 'txns' | 'plan' | 'wealth' | 'connections' | 'analyst' | 'risk' | 'advice' | 'ask' | 'news' | 'weekly' | 'settings';
 export interface ViewProps { data: AppData; update: (fn: (d: AppData) => AppData) => void; go: (p: Page) => void; openImport?: (what?: 'auto' | 'accounts' | 'portfolio') => void; askClaude?: (question: string) => void; enterBalances?: (ids: string[]) => void }
 
 const NAV: { id: Page; label: string; icon: typeof LayoutDashboard }[] = [
   { id: 'home', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'markets', label: 'Markets', icon: CandlestickChart },
+  { id: 'recap', label: 'Market recap', icon: Activity },
   { id: 'txns', label: 'Transactions', icon: ArrowLeftRight },
   { id: 'plan', label: 'Plan & Goals', icon: Target },
   { id: 'wealth', label: 'Wealth', icon: Wallet },
@@ -149,7 +152,7 @@ export default function App({ session, initial, persist, onLock, onSignOut }: Ap
   const go = (p: Page) => { setPage(p); setSheet(false); };
   const props: ViewProps = { data, update, go, openImport: (w = 'auto') => setImportOpen(w), askClaude: (q) => { setAskPreset(q); go('ask'); }, enterBalances: (ids) => setNeedBal(ids) };
   const views: Record<Page, JSX.Element> = {
-    home: <Dashboard {...props} weeklyDue={weeklyDue} />, markets: <Markets {...props} />, txns: <Transactions {...props} />, plan: <Plan {...props} />,
+    home: <Dashboard {...props} weeklyDue={weeklyDue} />, markets: <Markets {...props} />, recap: <Recap {...props} />, txns: <Transactions {...props} />, plan: <Plan {...props} />,
     wealth: <Wealth {...props} />, connections: <Connections {...props} />, analyst: <Analyst {...props} />, risk: <Risk {...props} />, advice: <AdviceView {...props} />, ask: <AskClaude {...props} preset={askPreset} onPresetUsed={() => setAskPreset(null)} />,
     news: <News {...props} />, weekly: <Weekly {...props} />, settings: <SettingsView {...props} onReset={() => setData(null)} session={session} onSignOut={onSignOut} thisDevice={thisDev} />,
   };
