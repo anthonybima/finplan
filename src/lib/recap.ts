@@ -18,7 +18,7 @@ const CCY: Record<string, [string, string, boolean]> = {
   '^SSMI': ['CHF', 'CHF=X', true], '^OMX': ['SEK', 'SEK=X', true], '^BFX': ['EUR', 'EURUSD=X', false],
 };
 /** US benchmarks vs MSCI's global indexes (via iShares ETFs). */
-export const GLOBAL: [string, string][] = [['S&P 500', '^GSPC'], ['Nasdaq', '^IXIC'], ['Dow Jones', '^DJI'], ['MSCI World', 'URTH'], ['MSCI ACWI', 'ACWI'], ['MSCI Emerging', 'EEM'], ['MSCI EAFE', 'EFA']];
+export const GLOBAL: [string, string][] = [['S&P 500', '^GSPC'], ['Nasdaq', '^IXIC'], ['Dow Jones', '^DJI'], ['MSCI World', 'URTH'], ['MSCI ACWI', 'ACWI'], ['MSCI EAFE', 'EFA'], ['MSCI Emerging', 'EEM'], ['MSCI Emerging IMI', 'IEMG'], ['MSCI EM ex China', 'EMXC'], ['MSCI Frontier & Select EM', 'FM']];
 export const MACRO: [string, string][] = [['Gold', 'GC=F'], ['Brent', 'BZ=F'], ['Copper', 'HG=F'], ['USD/IDR', 'USDIDR=X'], ['Dollar index', 'DX-Y.NYB'], ['Bitcoin', 'BTC-USD']];
 export const REGIONS: { id: 'asia' | 'europe'; name: string; pairs: MsciPair[] }[] = [{ id: 'asia', name: 'Asia Pacific', pairs: ASIA_MSCI }, { id: 'europe', name: 'Europe', pairs: EUROPE_MSCI }];
 
@@ -106,6 +106,8 @@ export function buildRecap(series: Record<string, Pt[]>, period: Period, now = D
   const [a, e] = regions;
   if (a.avgIdx != null && e.avgIdx != null) t.push(`${Math.abs(a.avgIdx - e.avgIdx) < 0.001 ? 'Asia Pacific and Europe moved alike' : `${a.avgIdx > e.avgIdx ? 'Asia Pacific' : 'Europe'} outperformed`}: average index ${pct(a.avgIdx)} in Asia Pacific vs ${pct(e.avgIdx)} in Europe (in local currencies).`);
   const sp = global.find((g) => g.sym === '^GSPC'), w = global.find((g) => g.sym === 'URTH'), em = global.find((g) => g.sym === 'EEM');
+  const fm = global.find((g) => g.sym === 'FM');
+  if (em && fm) t.push(`Emerging vs frontier: MSCI Emerging ${pct(em.r)}, MSCI Frontier & Select EM ${pct(fm.r)}${w ? `, MSCI World ${pct(w.r)}` : ''}.`);
   if (sp && w) t.push(`US vs world: S&P 500 ${pct(sp.r)} vs MSCI World ${pct(w.r)}${em ? ` and MSCI Emerging ${pct(em.r)}` : ''}. ${Math.abs(sp.r - w.r) < 0.003 ? 'Moving together.' : sp.r > w.r ? 'The US led the rest of the world.' : 'Markets outside the US did better.'}`);
   const withFx = regions.flatMap((g) => g.rows).filter((r) => r.gap != null && r.fx != null);
   if (withFx.length) {
@@ -121,4 +123,45 @@ export function buildRecap(series: Record<string, Pt[]>, period: Period, now = D
   const mac = [gold && `gold ${pct(gold.r)}`, oil && `Brent ${pct(oil.r)}`, idr && `USD/IDR ${pct(idr.r)}${idr.r > 0 ? ' (rupiah weaker)' : idr.r < 0 ? ' (rupiah stronger)' : ''}`].filter(Boolean);
   if (mac.length) t.push(`Macro: ${mac.join(', ')}.`);
   return { period, regions, global, macro, movers, takeaways: t, missing };
+}
+
+/* ---------- lead–lag: does the MSCI fund (US session) foreshadow the local index's next session? ---------- */
+const dayKey = (t: number, off = 0) => new Date(t + off * 1000).toISOString().slice(0, 10);
+/** Daily returns keyed by the market's own date. */
+export function dailyByDate(pts: Pt[], off = 0): Map<string, number> {
+  const m = new Map<string, number>();
+  for (let i = 1; i < pts.length; i++) if (pts[i - 1].c) m.set(dayKey(pts[i].t, off), pts[i].c / pts[i - 1].c - 1);
+  return m;
+}
+function corr(x: number[], y: number[]) {
+  const n = x.length; if (n < 20) return null;
+  const mx = x.reduce((a, b) => a + b, 0) / n, my = y.reduce((a, b) => a + b, 0) / n;
+  let sxy = 0, sxx = 0, syy = 0; for (let i = 0; i < n; i++) { const a = x[i] - mx, b = y[i] - my; sxy += a * b; sxx += a * a; syy += b * b; }
+  return sxx && syy ? { r: sxy / Math.sqrt(sxx * syy), beta: sxy / sxx, n } : null;
+}
+export interface LeadLag {
+  market: string; index: string; etf: string; n: number;
+  sameDay: number | null;   // corr(index d, MSCI d): MSCI reacting to the index session that closed before it
+  nextDay: number | null;   // corr(MSCI d, index next session): MSCI leading the index
+  beta: number | null;      // index next session ≈ beta × MSCI move
+  hit: number | null; bigDays: number; // on days MSCI moved ≥ 1%: share where the index followed in the same direction
+  follow: number | null;    // average index next-session move per +1% MSCI move on those big days
+  signal: { date: string; etf: number; expected: number } | null; // latest MSCI session the index hasn't traded after yet
+}
+export function leadLag(market: string, index: string, etf: string, idxPts: Pt[], idxOff: number, etfPts: Pt[], etfOff: number): LeadLag {
+  const I = dailyByDate(idxPts, idxOff), E = dailyByDate(etfPts, etfOff);
+  const idxDates = [...I.keys()].sort();
+  const nextIdx = (d: string) => { for (const k of idxDates) if (k > d) return k; return null; };
+  const same: [number, number][] = [], lead: [number, number][] = [];
+  for (const [d, e] of E) {
+    const i = I.get(d); if (i != null) same.push([i, e]);
+    const k = nextIdx(d); if (k) lead.push([e, I.get(k)!]);
+  }
+  const cs = corr(same.map((x) => x[0]), same.map((x) => x[1])), cl = corr(lead.map((x) => x[0]), lead.map((x) => x[1]));
+  const big = lead.filter(([e]) => Math.abs(e) >= 0.01);
+  const hit = big.length ? big.filter(([e, i]) => Math.sign(e) === Math.sign(i)).length / big.length : null;
+  const follow = big.length ? big.reduce((s, [e, i]) => s + i / e, 0) / big.length : null;
+  const lastE = [...E.keys()].sort().at(-1), lastI = idxDates.at(-1);
+  const signal = lastE && lastI && lastE >= lastI && cl ? { date: lastE, etf: E.get(lastE)!, expected: cl.beta * E.get(lastE)! } : null;
+  return { market, index, etf, n: lead.length, sameDay: cs?.r ?? null, nextDay: cl?.r ?? null, beta: cl?.beta ?? null, hit, bigDays: big.length, follow, signal };
 }

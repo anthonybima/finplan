@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { RefreshCw, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import type { ViewProps } from '../App';
 import { clearMarketCache, getSeries, type Pt } from '../lib/market';
-import { buildRecap, lastSessions, pct, PERIODS, recapSymbols, REGIONS, trendOf, type Period, type Trend } from '../lib/recap';
+import { buildRecap, lastSessions, leadLag, pct, PERIODS, recapSymbols, REGIONS, trendOf, type Period, type Trend } from '../lib/recap';
 import { findInstrument } from '../lib/marketCatalog';
 import { Card, Seg } from '../components/ui';
 
@@ -18,6 +18,7 @@ const P = ({ r }: { r: number | null | undefined }) => <span className={`chg ${t
 export default function Recap(_: ViewProps) {
   const [period, setPeriod] = useState<Period>('1D');
   const [series, setSeries] = useState<Record<string, Pt[]>>({});
+  const [offs, setOffs] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(0);
   const [stamp, setStamp] = useState(0);
   const syms = useMemo(recapSymbols, []);
@@ -25,14 +26,17 @@ export default function Recap(_: ViewProps) {
   useEffect(() => {
     let alive = true; setLoading(syms.length);
     for (const s of syms) getSeries(s, '1Y', stamp > 0)
-      .then((d) => { if (alive) setSeries((x) => ({ ...x, [s]: d.points })); })
+      .then((d) => { if (alive) { setSeries((x) => ({ ...x, [s]: d.points })); setOffs((x) => ({ ...x, [s]: d.gmtoffset ?? 0 })); } })
       .catch(() => {})
       .finally(() => alive && setLoading((n) => n - 1));
     return () => { alive = false; };
   }, [stamp]);
 
   const rc = useMemo(() => buildRecap(series, period), [series, period]);
+  const ll = useMemo(() => REGIONS.map((g) => ({ name: g.name, rows: g.pairs.filter(([, i, e]) => series[i]?.length && series[e]?.length).map(([m, i, e]) => leadLag(m, i, e, series[i], offs[i] ?? 0, series[e], offs[e] ?? 0)) })), [series, offs]);
   const have = syms.length - rc.missing.length;
+  const leaders = ll.flatMap((g) => g.rows).filter((r) => (r.nextDay ?? 0) >= 0.3).sort((x, y) => y.nextDay! - x.nextDay!);
+  const leadNote = leaders.length ? `MSCI funds lead the next local session most in ${leaders.slice(0, 4).map((r) => `${r.market} (${r.nextDay!.toFixed(2)}, +1% → ${pct((r.beta ?? 0) / 100, 2)})`).join(', ')}; see Lead–lag below.` : ll.some((g) => g.rows.length) ? 'No market shows a meaningful next-session lead from its MSCI fund over the last year.' : '';
   const top = rc.movers.slice(0, 6), bottom = rc.movers.slice(-6).reverse();
   const maxAbs = Math.max(0.0001, ...rc.movers.map((m) => Math.abs(m.r)));
   const heatRows = REGIONS.flatMap((g) => g.pairs.map(([market, idx]) => ({ market, sym: idx, s: series[idx] ? lastSessions(series[idx], 5) : [] }))).filter((r) => r.s.length);
@@ -50,7 +54,7 @@ export default function Recap(_: ViewProps) {
 
       <div className="grid g-2">
         <Card title={`Key takeaways · ${period}`}>
-          {rc.takeaways.length ? <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6 }}>{rc.takeaways.map((t, i) => <li key={i}>{t}</li>)}</ul> : <div className="small muted">Loading market data…</div>}
+          {rc.takeaways.length ? <ul style={{ margin: 0, paddingLeft: 18, lineHeight: 1.6 }}>{rc.takeaways.map((t, i) => <li key={i}>{t}</li>)}{leadNote && <li>{leadNote}</li>}</ul> : <div className="small muted">Loading market data…</div>}
         </Card>
         <Card title="Global benchmarks: US vs MSCI">
           <table className="table"><tbody>
@@ -96,6 +100,28 @@ export default function Recap(_: ViewProps) {
           <div className="small muted mt-s">How to read it: an MSCI fund is the market in US dollars, so fund ≈ (1 + index) × (1 + currency) − 1. <b>Other</b> is what's left: the fund's holdings differ from the local index (large and mid caps only, sector weights, foreign-ownership limits), plus fees and different closing times.</div>
         </Card>
       ))}
+
+      <Card title="Lead–lag: does the MSCI fund move before the local index?">
+        <div className="small muted" style={{ marginBottom: 8 }}>The MSCI fund trades in New York, after Asian markets close (and partly after Europe), so its move can show up in the local index on the <b>next</b> session. Last 12 months of daily closes, matched by each market's own date.</div>
+        {ll.map((g) => g.rows.length > 0 && (
+          <div key={g.name} style={{ overflowX: 'auto', marginBottom: 10 }}>
+            <table className="table">
+              <thead><tr><th>{g.name}</th><th style={{ textAlign: 'right' }} title="Correlation of the index and the fund on the same date">Same day</th><th style={{ textAlign: 'right' }} title="Correlation of the fund's move with the index's next session">Next session</th><th style={{ textAlign: 'right' }}>MSCI +1% → index next</th><th style={{ textAlign: 'right' }}>Followed on ≥1% days</th><th style={{ textAlign: 'right' }}>Next-session signal</th></tr></thead>
+              <tbody>{g.rows.map((r) => {
+                const strong = (r.nextDay ?? 0) >= 0.3;
+                return <tr key={r.market}>
+                  <td><b>{r.market}</b><div className="small muted">{r.etf} → {findInstrument(r.index).name.replace(/ \(.*\)$/, '')} · {r.n} sessions</div></td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>{r.sameDay == null ? '–' : r.sameDay.toFixed(2)}</td>
+                  <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}><span className={strong ? 'pill good' : ''}>{r.nextDay == null ? '–' : r.nextDay.toFixed(2)}</span></td>
+                  <td style={{ textAlign: 'right' }}>{r.beta == null ? '–' : <P r={r.beta / 100} />}</td>
+                  <td style={{ textAlign: 'right' }}>{r.hit == null ? '–' : `${Math.round(r.hit * 100)}% of ${r.bigDays}`}</td>
+                  <td style={{ textAlign: 'right' }}>{r.signal && strong ? <span title={`MSCI ${pct(r.signal.etf)} on ${r.signal.date}`}>MSCI <P r={r.signal.etf} /> → index ≈ <b><P r={r.signal.expected} /></b></span> : <span className="small muted">–</span>}</td>
+                </tr>;
+              })}</tbody>
+            </table>
+          </div>))}
+        <div className="small muted">How to read it: <b>Next session</b> near 0 = no lead; 0.3+ = the MSCI move tends to carry into the index the next session (highlighted). <b>MSCI +1% → index next</b> is the average follow-through (e.g. +0.40% means a +1% MSCI day is followed by about +0.4% in the index). The signal is shown only where the lead is meaningful, and it's a statistical tendency, not a forecast.</div>
+      </Card>
 
       <Card title="Day by day: last 5 sessions (local index, daily % change)">
         <div style={{ overflowX: 'auto' }}>

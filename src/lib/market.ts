@@ -15,6 +15,7 @@ export interface Series {
   sym: string; price: number; prevClose: number | null; change: number | null; changePct: number | null;
   rangeChangePct: number | null; points: Pt[]; currency?: string; dayHigh?: number; dayLow?: number; open?: number;
   updatedAt: number; source: 'Yahoo Finance' | 'Pluang' | 'Alpaca' | 'computed'; note?: string; marketOpen?: boolean;
+  gmtoffset?: number; // seconds east of UTC for the market's own date (daily bars)
   stats?: { volume?: string; lots?: string; turnover?: string; avg?: string; marketCap?: string };
 }
 export type DataSource = 'auto' | 'yahoo' | 'alpaca' | 'pluang';
@@ -57,6 +58,7 @@ async function yahoo(sym: string, rk: RangeKey): Promise<Series> {
   return {
     sym, price, prevClose, change: prevClose ? price - prevClose : null, changePct: prevClose ? price / prevClose - 1 : null,
     rangeChangePct: first ? price / first - 1 : null, points, currency: m.currency,
+    gmtoffset: typeof m.gmtoffset === 'number' ? m.gmtoffset : undefined,
     dayHigh: m.regularMarketDayHigh, dayLow: m.regularMarketDayLow, updatedAt: (m.regularMarketTime || Date.now() / 1000) * 1000, source: 'Yahoo Finance',
   };
 }
