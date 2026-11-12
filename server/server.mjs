@@ -137,15 +137,242 @@ function signupAllowed(email) {
   return false;
 }
 
+async function putFile(uid, id, b) {
+  if (typeof b.body !== 'string' || !b.body) throw new HttpError(400, 'Empty file');
+  if (id && !FILE_ID.test(id)) throw new HttpError(404, 'Not found');
+  const existing = await listFiles(uid);
+  const fid = id || crypto.randomBytes(12).toString('hex');
+  if (id && !existing.some((f) => f.id === id)) throw new HttpError(404, 'Not found');
+  if (!id && existing.length >= MAX_FILES) throw new HttpError(507, 'Too many copies stored');
+  const size = Buffer.byteLength(b.body);
+  if (size > MAX_BODY) throw new HttpError(413, 'Too large');
+  if (existing.filter((f) => f.id !== fid).reduce((s, f) => s + (f.size || 0), 0) + size > MAX_BYTES) throw new HttpError(507, 'Storage full');
+  const meta = cleanMeta(b);
+  const prev = id ? await readJson(fileOf(uid, id), {}) : {};
+  const rec = { id: fid, name: meta.name ?? prev.name, appProperties: meta.appProperties, modifiedTime: new Date().toISOString(), size, body: b.body };
+  await fs.mkdir(userDir(uid), { recursive: true, mode: 0o700 });
+  await writeAtomic(fileOf(uid, fid), JSON.stringify(rec));
+  const { body, ...out } = rec; return out;
+}
+async function verifyLogin(email, key, ip) {
+  if (limited(`auth:${ip}`)) throw new HttpError(429, 'Too many attempts. Wait 15 minutes.');
+  email = String(email || '').trim().toLowerCase();
+  if (!EMAIL.test(email) || !KEY.test(String(key || ''))) throw new HttpError(400, 'Enter a valid email and password');
+  const u = users[email];
+  if (u && u.lockUntil > Date.now()) throw new HttpError(429, 'Too many wrong passwords. Wait 15 minutes.');
+  const h = await scrypt(key, u ? u.salt : DUMMY_SALT);
+  if (!u || !same(h, u.hash)) {
+    if (u) { u.fails = (u.fails || 0) + 1; if (u.fails >= 8) { u.lockUntil = Date.now() + 15 * 60e3; u.fails = 0; } saveUsers(); }
+    throw new HttpError(401, 'Wrong email or password');
+  }
+  if (u.fails) { u.fails = 0; saveUsers(); }
+  return { uid: u.id, email };
+}
+
+/* ------------------------------------------------------------------ OAuth 2.1 + MCP (FinPlan Cloud as a Claude connector) */
+// Claude (claude.ai → Settings → Connectors → Add custom connector → https://<site>/mcp) registers itself (RFC 7591),
+// sends you to /oauth/authorize (sign in with your FinPlan Cloud email + password, PKCE S256), and then calls the
+// MCP tools below with a 1-hour access token (refresh token 30 days, rotated). Tools only move the SAME end-to-end
+// encrypted copies as /api/files: neither Claude nor this server can read your FinPlan data.
+const OAUTH = path.join(DATA, 'oauth.json');
+let oauth = { clients: {}, tokens: {} }; // clients: id → {redirect_uris, name, created}; tokens: sha(token) → {uid, kind, exp, client}
+const codes = new Map();   // sha(code) → {uid, client, redirect, challenge, exp, scope}
+const uploads = new Map(); // upload id → {uid, parts:[], size, exp}
+const saveOauth = () => (saving = saving.then(() => writeAtomic(OAUTH, JSON.stringify(oauth))).catch((e) => console.error('save oauth', e)));
+const ACCESS_TTL = 3600e3, REFRESH_TTL = 30 * 864e5;
+const PUBLIC_URL = (process.env.PUBLIC_URL || (process.env.SITE_ADDRESS ? `https://${process.env.SITE_ADDRESS}` : '')).replace(/\/$/, '');
+const originOf = (req) => PUBLIC_URL || `${req.headers['x-forwarded-proto'] || 'http'}://${req.headers['x-forwarded-host'] || req.headers.host}`;
+const b64url = (buf) => Buffer.from(buf).toString('base64url');
+const PAGE_HEADERS = {
+  'Content-Security-Policy': "default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'; img-src 'self' data:; form-action 'none'; base-uri 'none'; frame-ancestors 'none'",
+  'X-Frame-Options': 'DENY', 'Referrer-Policy': 'no-referrer', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'no-store',
+  'Strict-Transport-Security': 'max-age=63072000; includeSubDomains', 'X-Robots-Tag': 'noindex, nofollow',
+};
+function issueTokens(uid, client, scope) {
+  const access = crypto.randomBytes(32).toString('base64url'), refresh = crypto.randomBytes(32).toString('base64url');
+  oauth.tokens[sha(access)] = { uid, kind: 'access', exp: Date.now() + ACCESS_TTL, client };
+  oauth.tokens[sha(refresh)] = { uid, kind: 'refresh', exp: Date.now() + REFRESH_TTL, client };
+  saveOauth();
+  return { access_token: access, token_type: 'Bearer', expires_in: ACCESS_TTL / 1000, refresh_token: refresh, scope: scope || 'finplan' };
+}
+setInterval(() => {
+  const now = Date.now(); let ch = false;
+  for (const [k, t] of Object.entries(oauth.tokens)) if (t.exp < now) { delete oauth.tokens[k]; ch = true; }
+  for (const [k, c] of codes) if (c.exp < now) codes.delete(k);
+  for (const [k, u] of uploads) if (u.exp < now) uploads.delete(k);
+  if (ch) saveOauth();
+}, 10 * 60e3).unref();
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+function authorizePage(q, client, error) {
+  const hidden = ['client_id', 'redirect_uri', 'state', 'code_challenge', 'code_challenge_method', 'scope', 'resource'].map((k) => `<input type="hidden" name="${k}" value="${esc(q.get(k))}">`).join('');
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Connect FinPlan Cloud</title>
+<style>body{font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f6f8;color:#14212b;margin:0;display:grid;place-items:center;min-height:100vh}
+.card{background:#fff;border-radius:16px;box-shadow:0 4px 24px #0001;padding:28px;width:min(400px,92vw)}h1{font-size:20px;margin:0 0 4px}.m{color:#5b6b78;font-size:13px}
+label{display:block;font-size:13px;color:#4a5865;margin-top:12px}input[type=email],input[type=password]{box-sizing:border-box;width:100%;padding:10px 12px;border:1px solid #d5dde3;border-radius:10px;font:inherit;margin-top:4px}
+button{width:100%;margin-top:18px;padding:11px;border:0;border-radius:10px;background:#0f766e;color:#fff;font:600 15px system-ui;cursor:pointer}button:disabled{opacity:.6}
+.err{color:#b42318;font-size:13px;min-height:18px;margin-top:10px}ul{padding-left:18px;font-size:13px;color:#4a5865}</style></head>
+<body><main class="card"><h1>Connect FinPlan Cloud</h1><div class="m"><b>${esc(client.name || 'Claude')}</b> wants to sync your FinPlan data.</div>
+<ul><li>It can list, read and save your <b>encrypted</b> FinPlan sync copies.</li><li>It can't read your data: only your sync password opens it, on your devices.</li></ul>
+<form id="f" autocomplete="on">${hidden}<label>FinPlan Cloud email<input type="email" name="email" autocomplete="username" required></label>
+<label>Password<input type="password" name="password" autocomplete="current-password" required></label>
+<button id="b" type="submit">Sign in &amp; allow</button><div class="err" id="e">${esc(error || '')}</div></form>
+<div class="m">FinPlan Cloud sign-in. Your password never leaves this page in readable form.</div></main><script src="/oauth/authorize.js"></script></body></html>`;
+}
+const AUTHORIZE_JS = `(function(){var f=document.getElementById('f'),b=document.getElementById('b'),e=document.getElementById('e');
+function hex(buf){return Array.from(new Uint8Array(buf),function(x){return x.toString(16).padStart(2,'0')}).join('')}
+f.addEventListener('submit',async function(ev){ev.preventDefault();b.disabled=true;e.textContent='';var d=new FormData(f);var email=String(d.get('email')||'').trim().toLowerCase();
+try{var base=await crypto.subtle.importKey('raw',new TextEncoder().encode(String(d.get('password')||'').normalize('NFKC')),'PBKDF2',false,['deriveBits']);
+var key=hex(await crypto.subtle.deriveBits({name:'PBKDF2',hash:'SHA-256',salt:new TextEncoder().encode('finplan-cloud-login:'+email),iterations:310000},base,256));
+var body={email:email,key:key};['client_id','redirect_uri','state','code_challenge','code_challenge_method','scope','resource'].forEach(function(k){body[k]=d.get(k)||''});
+var r=await fetch('/oauth/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});var j=await r.json();
+if(!r.ok)throw new Error(j.error||'Sign-in failed');location.replace(j.redirect);}catch(x){e.textContent=x.message||'Sign-in failed';b.disabled=false}});})();`;
+
+async function readForm(req) {
+  const ct = req.headers['content-type'] || '';
+  const raw = await readBody(req, 64 * 1024);
+  if (ct.startsWith('application/json')) { try { return new Map(Object.entries(JSON.parse(raw))); } catch { throw new HttpError(400, 'Bad JSON'); } }
+  return new Map(new URLSearchParams(raw));
+}
+function oauthError(res, status, error, desc) { send(res, status, { error, error_description: desc }); }
+
+async function handleOAuth(req, res, p, m, ip) {
+  const base = originOf(req);
+  if (p === '/.well-known/oauth-protected-resource' || p === '/.well-known/oauth-protected-resource/mcp')
+    return send(res, 200, { resource: `${base}/mcp`, authorization_servers: [base], scopes_supported: ['finplan'], bearer_methods_supported: ['header'] });
+  if (p === '/.well-known/oauth-authorization-server' || p === '/.well-known/openid-configuration')
+    return send(res, 200, { issuer: base, authorization_endpoint: `${base}/oauth/authorize`, token_endpoint: `${base}/oauth/token`, registration_endpoint: `${base}/oauth/register`, revocation_endpoint: `${base}/oauth/revoke`,
+      response_types_supported: ['code'], grant_types_supported: ['authorization_code', 'refresh_token'], code_challenge_methods_supported: ['S256'], token_endpoint_auth_methods_supported: ['none'], scopes_supported: ['finplan'] });
+  if (p === '/oauth/authorize.js') { res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'no-cache', 'X-Content-Type-Options': 'nosniff' }); return res.end(AUTHORIZE_JS); }
+  if (p === '/oauth/register' && m === 'POST') {
+    if (limited(`reg:${ip}`, 20, 60 * 60e3)) return oauthError(res, 429, 'slow_down', 'Too many registrations');
+    if (Object.keys(oauth.clients).length > 500) return oauthError(res, 400, 'invalid_client_metadata', 'Too many clients');
+    const b = Object.fromEntries(await readForm(req));
+    const uris = Array.isArray(b.redirect_uris) ? b.redirect_uris.map(String) : [];
+    if (!uris.length || uris.length > 10 || uris.some((u) => { try { const x = new URL(u); return !(x.protocol === 'https:' || (x.protocol === 'http:' && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(x.hostname))) || x.hash; } catch { return true; } }))
+      return oauthError(res, 400, 'invalid_redirect_uri', 'redirect_uris must be https (or http://localhost)');
+    const id = 'fpc_' + crypto.randomBytes(16).toString('hex');
+    oauth.clients[id] = { redirect_uris: uris, name: String(b.client_name || 'MCP client').slice(0, 80), created: Date.now() }; saveOauth();
+    console.log(`oauth client registered ${id} (${oauth.clients[id].name})`);
+    return send(res, 201, { client_id: id, client_id_issued_at: Math.floor(Date.now() / 1000), client_name: oauth.clients[id].name, redirect_uris: uris, grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], token_endpoint_auth_method: 'none' });
+  }
+  if (p === '/oauth/authorize' && m === 'GET') {
+    const q = new URL(req.url, 'http://x').searchParams; const client = oauth.clients[q.get('client_id') || ''];
+    const page = (code, html) => { res.writeHead(code, { ...PAGE_HEADERS, 'Content-Type': 'text/html; charset=utf-8' }); res.end(html); };
+    if (!client || !client.redirect_uris.includes(q.get('redirect_uri') || '')) return page(400, '<!doctype html><title>FinPlan Cloud</title><p>This sign-in link is not valid (unknown app or redirect). Remove and add the FinPlan Cloud connector again.</p>');
+    if (q.get('response_type') !== 'code' || !q.get('code_challenge') || (q.get('code_challenge_method') || 'S256') !== 'S256') {
+      const u = new URL(q.get('redirect_uri')); u.searchParams.set('error', 'invalid_request'); u.searchParams.set('error_description', 'PKCE S256 and response_type=code are required'); if (q.get('state')) u.searchParams.set('state', q.get('state'));
+      res.writeHead(302, { Location: u.toString(), 'Cache-Control': 'no-store' }); return res.end();
+    }
+    return page(200, authorizePage(q, client));
+  }
+  if (p === '/oauth/approve' && m === 'POST') {
+    const b = await json(req);
+    const client = oauth.clients[b.client_id || ''];
+    if (!client || !client.redirect_uris.includes(b.redirect_uri)) throw new HttpError(400, 'Unknown app. Add the connector again.');
+    if (!/^[A-Za-z0-9_-]{43,128}$/.test(String(b.code_challenge || ''))) throw new HttpError(400, 'Bad PKCE challenge');
+    const who = await verifyLogin(b.email, b.key, ip);
+    const code = crypto.randomBytes(32).toString('base64url');
+    codes.set(sha(code), { uid: who.uid, client: b.client_id, redirect: b.redirect_uri, challenge: b.code_challenge, exp: Date.now() + 120e3, scope: 'finplan' });
+    const u = new URL(b.redirect_uri); u.searchParams.set('code', code); if (b.state) u.searchParams.set('state', b.state);
+    console.log(`oauth approved for ${who.uid} → ${client.name}`);
+    return send(res, 200, { redirect: u.toString() });
+  }
+  if (p === '/oauth/token' && m === 'POST') {
+    const f = await readForm(req); const g = f.get('grant_type');
+    if (g === 'authorization_code') {
+      const c = codes.get(sha(String(f.get('code') || ''))); codes.delete(sha(String(f.get('code') || '')));
+      if (!c || c.exp < Date.now() || c.client !== f.get('client_id') || c.redirect !== f.get('redirect_uri')) return oauthError(res, 400, 'invalid_grant', 'Code expired or not valid');
+      if (b64url(crypto.createHash('sha256').update(String(f.get('code_verifier') || '')).digest()) !== c.challenge) return oauthError(res, 400, 'invalid_grant', 'PKCE check failed');
+      return send(res, 200, issueTokens(c.uid, c.client, c.scope));
+    }
+    if (g === 'refresh_token') {
+      const k = sha(String(f.get('refresh_token') || '')); const t = oauth.tokens[k];
+      if (!t || t.kind !== 'refresh' || t.exp < Date.now() || (f.get('client_id') && t.client !== f.get('client_id'))) return oauthError(res, 400, 'invalid_grant', 'Sign in again');
+      delete oauth.tokens[k];
+      return send(res, 200, issueTokens(t.uid, t.client));
+    }
+    return oauthError(res, 400, 'unsupported_grant_type', 'Use authorization_code or refresh_token');
+  }
+  if (p === '/oauth/revoke' && m === 'POST') { const f = await readForm(req); delete oauth.tokens[sha(String(f.get('token') || ''))]; saveOauth(); return send(res, 200, {}); }
+  return null;
+}
+
+const MCP_TOOLS = [
+  { name: 'whoami', title: 'Which FinPlan Cloud account', description: 'The FinPlan Cloud account (email) this connector is signed in to, and how many encrypted copies it holds.', inputSchema: { type: 'object', properties: {} }, annotations: { readOnlyHint: true } },
+  { name: 'list_sync_copies', title: 'List encrypted FinPlan copies', description: 'Lists the end-to-end encrypted FinPlan sync copies (one per FinPlan user): id, name, modifiedTime, size, appProperties {rev, device, user, accountName}. The contents are ciphertext only.', inputSchema: { type: 'object', properties: {} }, annotations: { readOnlyHint: true } },
+  { name: 'read_sync_copy', title: 'Read an encrypted copy (in parts)', description: 'Returns part of an encrypted copy: {size, offset, data}. Call with offset 0, then offset+data.length until offset reaches size. Max 200000 characters per call.', inputSchema: { type: 'object', properties: { id: { type: 'string' }, offset: { type: 'integer', minimum: 0 }, length: { type: 'integer', minimum: 1, maximum: 200000 } }, required: ['id'] }, annotations: { readOnlyHint: true } },
+  { name: 'write_sync_copy', title: 'Save an encrypted copy (in parts)', description: 'Uploads an encrypted copy in parts of at most 200000 characters. First call: no upload_id (one is returned). Last call: done=true with appProperties, optional name, and id to overwrite an existing copy (omit id to create one). Returns the saved copy\'s metadata.', inputSchema: { type: 'object', properties: { upload_id: { type: 'string' }, data: { type: 'string', maxLength: 200000 }, done: { type: 'boolean' }, id: { type: 'string' }, name: { type: 'string' }, appProperties: { type: 'object', additionalProperties: { type: 'string' } } }, required: ['data'] }, annotations: { readOnlyHint: false, destructiveHint: false } },
+  { name: 'delete_sync_copy', title: 'Delete an encrypted copy', description: 'Deletes one encrypted copy by id.', inputSchema: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] }, annotations: { readOnlyHint: false, destructiveHint: true } },
+];
+async function mcpTool(uid, email, name, a = {}) {
+  if (name === 'whoami') { const l = await listFiles(uid); return { email, copies: l.length, bytes: l.reduce((s, f) => s + (f.size || 0), 0) }; }
+  if (name === 'list_sync_copies') return { files: await listFiles(uid) };
+  if (name === 'read_sync_copy') {
+    if (!FILE_ID.test(String(a.id || ''))) throw new HttpError(404, 'No such copy');
+    const f = await readJson(fileOf(uid, a.id), null); if (!f) throw new HttpError(404, 'No such copy');
+    const off = Math.max(0, Number(a.offset) || 0), len = Math.min(200000, Math.max(1, Number(a.length) || 200000));
+    return { id: f.id, size: f.body.length, offset: off, data: f.body.slice(off, off + len), modifiedTime: f.modifiedTime };
+  }
+  if (name === 'write_sync_copy') {
+    if (typeof a.data !== 'string' || a.data.length > 200000) throw new HttpError(400, 'data must be a string of at most 200000 characters');
+    let up = a.upload_id ? uploads.get(String(a.upload_id)) : null;
+    if (a.upload_id && (!up || up.uid !== uid)) throw new HttpError(400, 'Upload expired. Start again.');
+    if (!up) { if ([...uploads.values()].filter((u) => u.uid === uid).length > 5) throw new HttpError(429, 'Too many uploads in progress'); up = { uid, parts: [], size: 0, exp: Date.now() + 10 * 60e3 }; a.upload_id = crypto.randomBytes(12).toString('hex'); uploads.set(a.upload_id, up); }
+    up.parts.push(a.data); up.size += a.data.length; up.exp = Date.now() + 10 * 60e3;
+    if (up.size > MAX_BODY) { uploads.delete(a.upload_id); throw new HttpError(413, 'Too large'); }
+    if (!a.done) return { upload_id: a.upload_id, received: up.size };
+    uploads.delete(a.upload_id);
+    return { upload_id: a.upload_id, file: await putFile(uid, a.id || undefined, { body: up.parts.join(''), name: a.name, appProperties: a.appProperties }) };
+  }
+  if (name === 'delete_sync_copy') { if (!FILE_ID.test(String(a.id || ''))) throw new HttpError(404, 'No such copy'); await fs.rm(fileOf(uid, a.id), { force: true }); return { ok: true }; }
+  throw new HttpError(404, `Unknown tool ${name}`);
+}
+async function handleMcp(req, res) {
+  const base = originOf(req);
+  const challenge = () => { res.writeHead(401, { 'Content-Type': 'application/json', 'WWW-Authenticate': `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource", scope="finplan"`, 'Cache-Control': 'no-store' }); res.end(JSON.stringify({ error: 'invalid_token' })); };
+  const mm = /^Bearer ([A-Za-z0-9_-]{20,})$/.exec(req.headers.authorization || '');
+  const t = mm && oauth.tokens[sha(mm[1])];
+  if (!t || t.kind !== 'access' || t.exp < Date.now()) return challenge();
+  const email = Object.keys(users).find((e) => users[e].id === t.uid);
+  if (!email) return challenge();
+  if (req.method === 'GET') { res.writeHead(405, { Allow: 'POST' }); return res.end(); }
+  if (req.method === 'DELETE') { res.writeHead(200); return res.end(); }
+  if (req.method !== 'POST') { res.writeHead(405, { Allow: 'POST' }); return res.end(); }
+  let msg; try { msg = JSON.parse(await readBody(req, 512 * 1024)); } catch (e) { return send(res, 400, { jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }); }
+  const one = async (r) => {
+    if (!r || r.jsonrpc !== '2.0' || typeof r.method !== 'string') return { jsonrpc: '2.0', id: r?.id ?? null, error: { code: -32600, message: 'Invalid request' } };
+    if (r.id === undefined || r.id === null) return null; // notification
+    try {
+      if (r.method === 'initialize') return { jsonrpc: '2.0', id: r.id, result: { protocolVersion: r.params?.protocolVersion || '2025-06-18', capabilities: { tools: { listChanged: false } }, serverInfo: { name: 'FinPlan Cloud', title: 'FinPlan Cloud', version: '1.0.0' }, instructions: 'FinPlan Cloud keeps end-to-end encrypted FinPlan sync copies. The FinPlan app uses these tools to sync; the data is ciphertext, so there is nothing to read or analyse here.' } };
+      if (r.method === 'ping') return { jsonrpc: '2.0', id: r.id, result: {} };
+      if (r.method === 'tools/list') return { jsonrpc: '2.0', id: r.id, result: { tools: MCP_TOOLS } };
+      if (r.method === 'resources/list') return { jsonrpc: '2.0', id: r.id, result: { resources: [] } };
+      if (r.method === 'prompts/list') return { jsonrpc: '2.0', id: r.id, result: { prompts: [] } };
+      if (r.method === 'tools/call') {
+        try { const out = await mcpTool(t.uid, email, r.params?.name, r.params?.arguments || {}); return { jsonrpc: '2.0', id: r.id, result: { content: [{ type: 'text', text: JSON.stringify(out) }], structuredContent: out } }; }
+        catch (e) { if (!(e instanceof HttpError)) console.error(e); return { jsonrpc: '2.0', id: r.id, result: { isError: true, content: [{ type: 'text', text: e instanceof HttpError ? e.message : 'Server error' }] } }; }
+      }
+      return { jsonrpc: '2.0', id: r.id, error: { code: -32601, message: 'Method not found' } };
+    } catch (e) { console.error(e); return { jsonrpc: '2.0', id: r.id, error: { code: -32603, message: 'Internal error' } }; }
+  };
+  const out = Array.isArray(msg) ? (await Promise.all(msg.map(one))).filter(Boolean) : await one(msg);
+  if (!out || (Array.isArray(out) && !out.length)) { res.writeHead(202); return res.end(); }
+  const headers = { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' };
+  if (msg?.method === 'initialize') headers['Mcp-Session-Id'] = crypto.randomBytes(16).toString('hex');
+  res.writeHead(200, headers); res.end(JSON.stringify(out));
+}
+
 async function handle(req, res) {
   const url = new URL(req.url, 'http://x');
   const p = url.pathname; const m = req.method;
   const ip = ipOf(req);
 
+  if (p === '/mcp' || p === '/mcp/') return handleMcp(req, res);
+  if (p.startsWith('/oauth/') || p.startsWith('/.well-known/')) { const r = await handleOAuth(req, res, p, m, ip); if (r !== null) return r; throw new HttpError(404, 'Not found'); }
   if (p === '/api/health') return send(res, 200, { ok: true, signup: Object.keys(users).length === 0 || SIGNUP === 'open' || ALLOWED.length > 0 });
 
   if (m === 'POST' && (p === '/api/signup' || p === '/api/login')) {
-    if (limited(`auth:${ip}`)) throw new HttpError(429, 'Too many attempts. Wait 15 minutes.');
+    if (p === '/api/signup' && limited(`auth:${ip}`)) throw new HttpError(429, 'Too many attempts. Wait 15 minutes.');
     const b = await json(req);
     const email = String(b.email || '').trim().toLowerCase();
     if (!EMAIL.test(email) || !KEY.test(String(b.key || ''))) throw new HttpError(400, 'Enter a valid email and password');
@@ -158,15 +385,8 @@ async function handle(req, res) {
       console.log(`signup ${users[email].id}`);
       return send(res, 200, { token: newSession(users[email].id), email });
     }
-    const u = users[email];
-    if (u && u.lockUntil > Date.now()) throw new HttpError(429, 'Too many wrong passwords. Wait 15 minutes.');
-    const h = await scrypt(b.key, u ? u.salt : DUMMY_SALT); // same work whether or not the email exists
-    if (!u || !same(h, u.hash)) {
-      if (u) { u.fails = (u.fails || 0) + 1; if (u.fails >= 8) { u.lockUntil = Date.now() + 15 * 60e3; u.fails = 0; } saveUsers(); }
-      throw new HttpError(401, 'Wrong email or password');
-    }
-    if (u.fails) { u.fails = 0; saveUsers(); }
-    return send(res, 200, { token: newSession(u.id), email });
+    const who = await verifyLogin(email, b.key, ip);
+    return send(res, 200, { token: newSession(who.uid), email });
   }
 
   const me = auth(req);
@@ -179,6 +399,7 @@ async function handle(req, res) {
     if (!same(await scrypt(b.key, u.salt), u.hash)) throw new HttpError(401, 'Current password is wrong');
     u.salt = crypto.randomBytes(16).toString('hex'); u.hash = await scrypt(b.newKey, u.salt); await saveUsers();
     for (const [k, s] of Object.entries(sessions)) if (s.uid === me.uid) delete sessions[k];
+    for (const [k, t] of Object.entries(oauth.tokens)) if (t.uid === me.uid) delete oauth.tokens[k]; saveOauth();
     return send(res, 200, { token: newSession(me.uid) });
   }
 
@@ -191,19 +412,7 @@ async function handle(req, res) {
     if (m === 'DELETE' && id) { await fs.rm(fileOf(me.uid, id), { force: true }); return send(res, 200, { ok: true }); }
     if ((m === 'POST' && !id) || (m === 'PUT' && id)) {
       const b = await json(req, MAX_BODY + 64 * 1024);
-      if (typeof b.body !== 'string' || !b.body) throw new HttpError(400, 'Empty file');
-      const existing = await listFiles(me.uid);
-      const fid = id || crypto.randomBytes(12).toString('hex');
-      if (id && !existing.some((f) => f.id === id)) throw new HttpError(404, 'Not found');
-      if (!id && existing.length >= MAX_FILES) throw new HttpError(507, 'Too many copies stored');
-      const size = Buffer.byteLength(b.body);
-      if (existing.filter((f) => f.id !== fid).reduce((s, f) => s + (f.size || 0), 0) + size > MAX_BYTES) throw new HttpError(507, 'Storage full');
-      const meta = cleanMeta(b);
-      const prev = id ? await readJson(fileOf(me.uid, id), {}) : {};
-      const rec = { id: fid, name: meta.name ?? prev.name, appProperties: meta.appProperties, modifiedTime: new Date().toISOString(), size, body: b.body };
-      await fs.mkdir(userDir(me.uid), { recursive: true, mode: 0o700 });
-      await writeAtomic(fileOf(me.uid, fid), JSON.stringify(rec));
-      const { body, ...out } = rec; return send(res, 200, out);
+      return send(res, 200, await putFile(me.uid, id, b));
     }
   }
   throw new HttpError(404, 'Not found');
@@ -212,6 +421,7 @@ async function handle(req, res) {
 await fs.mkdir(FILES, { recursive: true, mode: 0o700 });
 users = await readJson(USERS, {});
 sessions = await readJson(SESSIONS, {});
+oauth = { clients: {}, tokens: {}, ...(await readJson(OAUTH, {})) };
 http.createServer((req, res) => {
   handle(req, res).catch((e) => {
     const status = e instanceof HttpError ? e.status : 500;

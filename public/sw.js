@@ -1,10 +1,10 @@
 // Offline cache for the installable (PWA) version.
-const CACHE = 'finplan-v2';
+const CACHE = 'finplan-v3';
 self.addEventListener('install', (e) => { self.skipWaiting(); });
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
-  if (e.request.method !== 'GET' || url.origin !== location.origin || url.pathname.startsWith('/api/')) return; // never cache news/API calls or FinPlan Cloud
+  if (e.request.method !== 'GET' || url.origin !== location.origin || /^\/(api|oauth|mcp)(\/|$)|^\/\.well-known\//.test(url.pathname)) return; // never cache news/API calls, FinPlan Cloud or its sign-in
   e.respondWith(
     fetch(e.request).then((res) => {
       const copy = res.clone();

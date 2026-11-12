@@ -5,6 +5,7 @@ import * as G from '../lib/gdrive';
 import { onClaudeStore } from '../lib/claudeCloud';
 import { signOut as signOutCloud } from '../lib/serverCloud';
 import { CloudSignIn } from '../components/CloudSignIn';
+import { BackendSwitch, ConnectorHelp } from '../components/Sync';
 import * as S from '../lib/sync';
 import { setSecretNamespace } from '../lib/secure';
 import { Logo } from '../components/ui';
@@ -50,6 +51,7 @@ export default function Login({ onSession, lockedUser }: { onSession: (s: Sessio
   const [pickC, setPickC] = useState<G.RemoteMeta | null>(null);
   const [devPw, setDevPw] = useState('');
   const [, rerender] = useState(0);
+  useEffect(() => { const f = () => { rerender((n) => n + 1); setCloudList(null); }; window.addEventListener('finplan-backend', f); return () => window.removeEventListener('finplan-backend', f); }, []);
   const signedIn = !!G.currentToken();
   useEffect(() => { if (!sel) return; const t = setInterval(() => setLock(secondsLocked(sel.id)), 1000); setLock(secondsLocked(sel.id)); return () => clearInterval(t); }, [sel]);
 
@@ -146,10 +148,11 @@ export default function Login({ onSession, lockedUser }: { onSession: (s: Sessio
         {mode === 'cloud' && (<>
           <h2>Use my account from another device</h2>
           <p className="small muted" style={{ marginTop: 0 }}>Opens the same FinPlan account (e.g. the one on your computer) with its data, and keeps both in sync through {G.cloudLabel()}. Each account only sees its own data. Needs sync turned on there first (Settings → Sync between devices).{G.usingClaude() ? ' Both devices must use FinPlan in Claude, signed in to the same Claude account.' : ''}</p>
-          {!G.usingClaude() && !signedIn ? (
+          {G.canChooseBackend() && !cloudList && <><BackendSwitch on={false} />{G.usingConnector() && <ConnectorHelp />}</>}
+          {!G.canChooseBackend() && !signedIn ? (
             <CloudSignIn intro={<p className="small" style={{ marginTop: 0 }}>Sign in with the <b>FinPlan Cloud</b> email and password you used on your computer.</p>} onDone={() => { rerender((n) => n + 1); findAccounts(); }} />
           ) : !cloudList ? (<>
-            {!G.usingClaude() && <div className="small muted" style={{ marginBottom: 6 }}>Signed in to FinPlan Cloud as <b>{G.currentToken()?.email}</b> · <a href="#" onClick={async (e) => { e.preventDefault(); await signOutCloud(); rerender((n) => n + 1); }}>use another email</a></div>}
+            {!G.canChooseBackend() && <div className="small muted" style={{ marginBottom: 6 }}>Signed in to FinPlan Cloud as <b>{G.currentToken()?.email}</b> · <a href="#" onClick={async (e) => { e.preventDefault(); await signOutCloud(); rerender((n) => n + 1); }}>use another email</a></div>}
             <button className="btn primary" style={{ width: '100%' }} disabled={busy} onClick={findAccounts}><Cloud size={16} /> {busy ? 'Looking…' : 'Find my accounts'}</button>
           </>) : (<>
             <div className="small muted" style={{ marginBottom: 6 }}>Accounts in {tok?.email || 'your cloud'}:</div>

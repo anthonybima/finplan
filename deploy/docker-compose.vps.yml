@@ -23,6 +23,7 @@ services:
     environment:
       DATA_DIR: /data
       SIGNUP: first
+      PUBLIC_URL: https://finplan.bimabearing.cloud
     entrypoint: ["/bin/sh", "-c", "wget -qO /tmp/api-run.mjs https://raw.githubusercontent.com/anthonybima/finplan/site/api-run.mjs && exec node /tmp/api-run.mjs"]
     volumes:
       - finplan_cloud:/data

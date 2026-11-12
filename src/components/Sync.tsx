@@ -6,6 +6,7 @@ import * as G from '../lib/gdrive';
 import { onClaudeStore } from '../lib/claudeCloud';
 import * as Srv from '../lib/serverCloud';
 import { CloudSignIn } from './CloudSignIn';
+import * as Con from '../lib/connectorCloud';
 import * as S from '../lib/sync';
 import { getDevice } from '../lib/auth';
 
@@ -61,7 +62,7 @@ export function SyncProvider({ uid, name = 'FinPlan', data, setData, children }:
       } catch (e: any) {
         const st = { ...S.loadState(uid), lastError: e?.message || String(e) }; S.saveState(uid, st); setState(st);
         setPhase(e instanceof G.NeedsSignIn ? 'needs-auth' : 'error');
-        if (e instanceof G.NeedsSignIn && interactive) setSignIn(true);
+        if (e instanceof G.NeedsSignIn && interactive && !G.usingConnector()) setSignIn(true); else if (e instanceof G.NeedsSignIn && interactive) toast(e.message);
       } finally {
         running.current = null;
         if (changedWhileRunning.current) { // the round saved its state as clean: mark the newer local change and push it
@@ -151,7 +152,7 @@ function SetupModal({ uid, name, data, device, onClose, onDone }: { uid: string;
       if (same && same.length === 1) i = { ...i, exists: true, meta: same[0], file: await S.readFile(tt, same[0]) }; // same account name → offer it directly
       setInfo(i);
       setStep(i.exists ? 'join' : i.others.length ? 'choose' : 'create');
-    } catch (e: any) { if (e instanceof G.NeedsSignIn) setStep('signin'); toast(e?.message || 'Could not reach the cloud'); }
+    } catch (e: any) { if (e instanceof G.NeedsSignIn && !G.canChooseBackend()) setStep('signin'); toast(e?.message || 'Could not reach the cloud'); }
     setBusy(false);
   };
   const create = async () => {
@@ -187,7 +188,10 @@ function SetupModal({ uid, name, data, device, onClose, onDone }: { uid: string;
       )}
       {step === 'connect' && (
         <>
-          {G.usingClaude()
+          {G.usingConnector()
+            ? <><p style={{ marginTop: 0 }}>FinPlan keeps its encrypted copy on <b>FinPlan Cloud</b>, the same place as <b>{Con.CONNECTOR_URL.replace('/mcp', '').replace('https://', '')}</b>, through Claude's <b>{Con.CONNECTOR}</b> connector. FinPlan in Claude and on the website then share one account.</p>
+              <ConnectorHelp /></>
+            : G.usingClaude()
             ? <p style={{ marginTop: 0 }}>FinPlan keeps an encrypted copy in <b>your Claude account's private storage</b> for FinPlan (nobody else can read it). Open FinPlan in Claude on your phone or another computer, signed in to the same Claude account, to get the same data.</p>
             : <p style={{ marginTop: 0 }}>Signed in to FinPlan Cloud as <b>{G.currentToken()?.email}</b>. FinPlan keeps one encrypted copy per FinPlan user there.</p>}
           <ul className="small muted">
@@ -195,14 +199,14 @@ function SetupModal({ uid, name, data, device, onClose, onDone }: { uid: string;
             <li>Your Bitget/Bittime/Alpaca/Claude API keys are never synced.</li>
           </ul>
           <div className="row" style={{ justifyContent: 'space-between' }}>
-            {!G.usingClaude() ? <button className="btn ghost sm" onClick={async () => { await Srv.signOut(); setStep('signin'); }}>Use another email</button> : <span />}
+            {!G.canChooseBackend() ? <button className="btn ghost sm" onClick={async () => { await Srv.signOut(); setStep('signin'); }}>Use another email</button> : <span />}
             <button className="btn primary" disabled={busy} onClick={connect}><Link2 size={15} /> {busy ? 'Checking…' : 'Continue'}</button>
           </div>
         </>
       )}
       {step === 'choose' && info && (
         <>
-          <p style={{ marginTop: 0 }}>{G.usingClaude() ? 'Your Claude account' : <>Your FinPlan Cloud account{tok?.email ? <> (<b>{tok.email}</b>)</> : ''}</>} holds other FinPlan users. Each one syncs its own data only.</p>
+          <p style={{ marginTop: 0 }}>{G.usingClaude() ? 'Your Claude account' : G.usingConnector() ? 'FinPlan Cloud' : <>Your FinPlan Cloud account{tok?.email ? <> (<b>{tok.email}</b>)</> : ''}</>} holds other FinPlan users. Each one syncs its own data only.</p>
           {info.others.map((o) => (
             <button key={o.id} className="item btn ghost" style={{ width: '100%', justifyContent: 'flex-start', border: '1px solid var(--line)', marginBottom: 8, padding: 10 }}
               onClick={async () => { setBusy(true); try { setInfo({ ...info, exists: true, meta: o, file: await S.readFile(tok!, o) }); setStep('join'); } catch (e: any) { toast(e?.message || 'Could not read it'); } setBusy(false); }}>
@@ -240,9 +244,44 @@ function SetupModal({ uid, name, data, device, onClose, onDone }: { uid: string;
   );
 }
 
+/** Inside Claude: where to keep the encrypted copy (Claude's storage, or FinPlan Cloud shared with the website). */
+export function BackendSwitch({ on, onSwitch }: { on: boolean; onSwitch?: () => void }) {
+  const [, re] = useState(0); const [ask, setAsk] = useState<Con.Backend | null>(null);
+  if (!G.canChooseBackend()) return null;
+  const cur = Con.backend();
+  const pick = (b: Con.Backend) => { if (b === cur) return; if (on) { setAsk(b); return; } Con.setBackend(b); re((n) => n + 1); window.dispatchEvent(new Event('finplan-backend')); };
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div className="small muted" style={{ marginBottom: 4 }}>Keep my synced copy in</div>
+      <div className="seg">
+        <button className={cur === 'claude' ? 'on' : ''} onClick={() => pick('claude')}>My Claude account</button>
+        <button className={cur === 'website' ? 'on' : ''} onClick={() => pick('website')}>FinPlan Cloud (website)</button>
+      </div>
+      {ask && <div className="small mt-s" style={{ background: 'var(--bg)', padding: 8, borderRadius: 8 }}>
+        Switching stops sync on this device (your data here stays). Then tap <b>Turn on sync</b> to link it to {ask === 'website' ? 'FinPlan Cloud' : 'your Claude account'}.
+        <div className="row mt-s"><button className="btn primary sm" onClick={() => { onSwitch?.(); Con.setBackend(ask); setAsk(null); re((n) => n + 1); window.dispatchEvent(new Event('finplan-backend')); }}>Switch</button><button className="btn ghost sm" onClick={() => setAsk(null)}>Cancel</button></div>
+      </div>}
+    </div>
+  );
+}
+export function ConnectorHelp() {
+  return (
+    <details className="small" style={{ marginBottom: 10 }}>
+      <summary style={{ cursor: 'pointer' }}>First time: add the <b>{Con.CONNECTOR}</b> connector to Claude</summary>
+      <ol style={{ paddingLeft: 18 }}>
+        <li>claude.ai → <b>Settings → Connectors → Add custom connector</b>.</li>
+        <li>Name: <b>{Con.CONNECTOR}</b> · URL: <code style={{ userSelect: 'all' }}>{Con.CONNECTOR_URL}</code> → Add → <b>Connect</b>.</li>
+        <li>Sign in with your FinPlan Cloud email + password (the website account) and allow.</li>
+        <li>Back here, tap Continue / Sync now and allow FinPlan to use the connector.</li>
+      </ol>
+    </details>
+  );
+}
+
 /** Settings card. */
 export function SyncCard() {
-  const s = useSync(); const [arm, setArm] = useState(false);
+  const s = useSync(); const [arm, setArm] = useState(false); const [, re] = useState(0);
+  useEffect(() => { const f = () => re((n) => n + 1); window.addEventListener('finplan-backend', f); return () => window.removeEventListener('finplan-backend', f); }, []);
   if (!s) return null;
   const head = <><Cloud size={17} style={{ verticalAlign: -3 }} /> Sync between devices</>;
   if (s.phase === 'unsupported') return (
@@ -251,14 +290,17 @@ export function SyncCard() {
   );
   if (s.phase === 'off') return (
     <Card title={head}>
-      <p className="small muted" style={{ marginTop: 0 }}>Use this same user on your phone and laptop. FinPlan keeps an <b>end-to-end encrypted</b> copy {G.usingClaude() ? <>in your Claude account's private FinPlan storage (open FinPlan in Claude on each device)</> : <>on FinPlan Cloud, this website's server, under your email + password</>}; only your sync password can open it.</p>
+      <BackendSwitch on={false} />
+      <p className="small muted" style={{ marginTop: 0 }}>Use this same user on your phone and laptop. FinPlan keeps an <b>end-to-end encrypted</b> copy {G.usingClaude() ? <>in your Claude account's private FinPlan storage (open FinPlan in Claude on each device)</> : G.usingConnector() ? <>on FinPlan Cloud through Claude's {Con.CONNECTOR} connector, shared with the website</> : <>on FinPlan Cloud, this website's server, under your email + password</>}; only your sync password can open it.</p>
+      {G.usingConnector() && <ConnectorHelp />}
       <button className="btn primary" onClick={s.openSetup}><Link2 size={15} /> Turn on sync</button></Card>
   );
   return (
     <Card title={head}>
+      <BackendSwitch on onSwitch={() => s.disconnect(false)} />
       <div className="row small" style={{ marginBottom: 8 }}>
         <span className={`pill ${s.phase === 'idle' ? 'good' : s.phase === 'error' ? 'bad' : ''}`}>{s.phase === 'syncing' ? 'Syncing…' : s.phase === 'needs-auth' ? 'Paused' : s.phase === 'error' ? 'Error' : 'On'}</span>
-        <span className="muted">{G.usingClaude() ? 'Claude account' : G.currentToken()?.email || s.state.email || 'FinPlan Cloud'} · last sync {ago(s.state.lastSyncAt)}{s.state.dirty ? ' · changes waiting' : ''}</span>
+        <span className="muted">{G.usingClaude() ? 'Claude account' : G.usingConnector() ? 'FinPlan Cloud (website)' : G.currentToken()?.email || s.state.email || 'FinPlan Cloud'} · last sync {ago(s.state.lastSyncAt)}{s.state.dirty ? ' · changes waiting' : ''}</span>
       </div>
       {s.state.lastError && s.phase !== 'idle' && <div className="small" style={{ color: 'var(--bad)', marginBottom: 8 }}>{s.state.lastError}</div>}
       <div className="row">
@@ -266,8 +308,8 @@ export function SyncCard() {
         <button className="btn sm" onClick={() => s.disconnect(false)}><Unlink size={14} /> Stop on this device</button>
         <button className="btn sm danger" onClick={() => { if (!arm) { setArm(true); setTimeout(() => setArm(false), 4000); return; } s.disconnect(true); }}><Trash2 size={14} /> {arm ? 'Tap again to delete cloud copy' : 'Delete cloud copy'}</button>
       </div>
-      {!G.usingClaude() && G.currentToken() && <div className="row mt-s"><button className="btn ghost sm" onClick={async () => { await Srv.signOut(); s.syncNow(false); }}><LogOut size={14} /> Sign out of FinPlan Cloud</button></div>}
-      <div className="small muted mt-s">This device: {s.device}.{G.usingClaude() ? ' Syncs automatically while FinPlan is open in Claude.' : ' Stays signed in to FinPlan Cloud for 30 days of use; syncs automatically while FinPlan is open.'}</div>
+      {!G.canChooseBackend() && G.currentToken() && <div className="row mt-s"><button className="btn ghost sm" onClick={async () => { await Srv.signOut(); s.syncNow(false); }}><LogOut size={14} /> Sign out of FinPlan Cloud</button></div>}
+      <div className="small muted mt-s">This device: {s.device}.{G.canChooseBackend() ? ' Syncs automatically while FinPlan is open in Claude.' : ' Stays signed in to FinPlan Cloud for 30 days of use; syncs automatically while FinPlan is open.'}</div>
     </Card>
   );
 }
