@@ -125,6 +125,7 @@ export interface Settings {
   newsV2?: boolean;
   dashboards?: MarketDashboard[];
   marketsLayout?: number; // sample-layout version applied to saved dashboards
+  liveAt?: string; // last live refresh of prices and exchange rates (lib/live.ts)
   activeDashboard?: string;
   lastBackupAt?: string;
   monthlyUpdate?: MonthlyReminder;

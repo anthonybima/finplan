@@ -1,3 +1,4 @@
+import { AllocationCard } from '../components/Allocation';
 import { useMemo, useState } from 'react';
 import { Plus, Trash2, Upload, FolderTree, Pencil, Search, Eye, EyeOff, Landmark, Smartphone, Banknote, TrendingUp, Home, CreditCard, CalendarDays, ChevronRight, MoreHorizontal, Link2, List, LayoutGrid, Rows3 } from 'lucide-react';
 import type { ViewProps } from '../App';
@@ -200,12 +201,13 @@ function NetWorthBreakdown({ data, onClose, onOpen }: { data: ViewProps['data'];
 /** Extra sections as tabs, so the page stays one screen. */
 function MoreTabs({ data, update }: { data: ViewProps['data']; update: ViewProps['update'] }) {
   const fx = usedCurrencies(data).length > 0;
-  const tabs = [{ v: 'currency', l: 'By currency' }, ...(fx ? [{ v: 'rates', l: 'Rates' }] : []), { v: 'year', l: 'By year' }];
-  const [tab, setTab] = useState(() => { try { return localStorage.getItem('finplan.wealthTab') || 'none'; } catch { return 'none'; } });
+  const tabs = [{ v: 'alloc', l: 'Allocation' }, { v: 'currency', l: 'By currency' }, ...(fx ? [{ v: 'rates', l: 'Rates' }] : []), { v: 'year', l: 'By year' }];
+  const [tab, setTab] = useState(() => { try { return localStorage.getItem('finplan.wealthTab') || 'alloc'; } catch { return 'alloc'; } });
   const pick = (v: string) => { const n = tab === v ? 'none' : v; setTab(n); try { localStorage.setItem('finplan.wealthTab', n); } catch { /* */ } };
   return (
     <div className="mt">
       <div className="tabs-row">{tabs.map((t) => <button key={t.v} className={`chip ${tab === t.v ? 'on' : ''}`} onClick={() => pick(t.v)}>{t.l}</button>)}</div>
+      {tab === 'alloc' && <AllocationCard data={data} update={update} />}
       {tab === 'currency' && <CurrencyCard data={data} />}
       {tab === 'rates' && fx && <RatesCard data={data} update={update} />}
       {tab === 'year' && data.accounts.length > 0 && <ByYear data={data} />}

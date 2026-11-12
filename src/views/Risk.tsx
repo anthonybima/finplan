@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Bot } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, Cell, Legend, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { AllocationDonut } from '../components/Allocation';
 import type { ViewProps } from '../App';
 import type { AssetClass, RiskAnswers } from '../lib/types';
 import { ASSUMPTIONS, healthMetrics, portfolioStats, RISK_QUESTIONS, riskProfile, stressTests } from '../lib/risk';
@@ -75,12 +76,7 @@ export default function Risk({ data, update, askClaude }: ViewProps) {
         </Card>
         <Card title="Current allocation">
           {p.rows.length ? (<>
-            <div style={{ height: 180 }}>
-              <ResponsiveContainer><PieChart>
-                <Pie isAnimationActive={false} data={p.rows} dataKey="value" nameKey="label" innerRadius={45} outerRadius={78} paddingAngle={2}>
-                  {p.rows.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}</Pie>
-                <Tooltip formatter={(v) => money(Number(v))} /></PieChart></ResponsiveContainer>
-            </div>
+            <AllocationDonut rows={p.rows} />
             {p.rows.map((r, i) => <div key={r.cls} className="kv"><span><span style={{ display: 'inline-block', width: 9, height: 9, borderRadius: 3, background: COLORS[i], marginRight: 7 }} />{r.label}</span><b>{pct(r.weight, 0)}</b></div>)}
           </>) : <div className="empty">No assets yet.</div>}
         </Card>

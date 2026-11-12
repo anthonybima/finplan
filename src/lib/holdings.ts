@@ -64,13 +64,7 @@ export function replaceSource(d: AppData, source: Source, holdings: Holding[], s
 
 /* ---------- Prices & FX ---------- */
 
-async function yahooPrice(sym: string): Promise<number | null> {
-  try {
-    const j = await getJSON<any>(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(sym)}?range=1d&interval=1d`);
-    const p = j?.chart?.result?.[0]?.meta?.regularMarketPrice;
-    return typeof p === 'number' && p > 0 ? p : null;
-  } catch { return null; }
-}
+const yahooPrice = (sym: string) => import('./market').then((m) => m.livePrice(sym)).catch(() => null);
 
 export async function bitgetTickers(): Promise<Map<string, number>> {
   const j = await getJSON<any>('https://api.bitget.com/api/v2/spot/market/tickers');

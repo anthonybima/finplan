@@ -92,8 +92,7 @@ export async function fetchRates(codes: string[]): Promise<Record<string, number
   const out: Record<string, number> = {};
   await Promise.all(codes.filter((c) => c !== 'IDR').map(async (c) => {
     try {
-      const j = await getJSON<any>(`https://query1.finance.yahoo.com/v8/finance/chart/${c === 'USD' ? 'IDR%3DX' : `${c}IDR%3DX`}?range=1d&interval=1d`);
-      const p = j?.chart?.result?.[0]?.meta?.regularMarketPrice;
+      const p = await (await import('./market')).livePrice(c === 'USD' ? 'IDR=X' : `${c}IDR=X`);
       const lo = (ccyInfo(c)?.fallback || 1) / 3, hi = (ccyInfo(c)?.fallback || 1) * 3;
       if (typeof p === 'number' && p > lo && p < hi) out[c] = p;
     } catch { /* not reachable here */ }

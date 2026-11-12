@@ -21,6 +21,7 @@ import { DevicePending, PendingDevicesBanner } from './components/Devices';
 import { myDevice, registerDevice, type ThisDevice } from './lib/devices';
 import { getDevice, removeLocalUser } from './lib/auth';
 import { revalueFx } from './lib/fx';
+import { liveStale, refreshLive } from './lib/live';
 import { monthlyOf, reminderLabel, reminderState, showReminderNotification } from './lib/reminders';
 import Welcome from './views/Welcome';
 import Dashboard from './views/Dashboard';
@@ -76,6 +77,14 @@ export default function App({ session, initial, persist, onLock, onSignOut }: Ap
   useEffect(() => { if (data && thisDev && registerDevice(data, thisDev)) update((d) => registerDevice(d, thisDev) ?? d); }, [!!data, thisDev, data?.devices]);
   // foreign-currency accounts: keep their rupiah value in step with the rates (USD/IDR, SGD/IDR…)
   useEffect(() => { if (data && revalueFx(data) !== data) update((d) => revalueFx(d)); }, [data?.settings.usdIdr, data?.settings.fxRates, data?.accounts]);
+  // live prices + exchange rates: on open, every 15 min while visible, and when coming back to the app
+  const dataRef = useRef(data); dataRef.current = data;
+  useEffect(() => {
+    if (!data) return;
+    const tick = () => { const d = dataRef.current; if (d && !document.hidden && liveStale(d)) refreshLive(d, update).catch(() => {}); };
+    tick(); const t = setInterval(tick, 60e3); document.addEventListener('visibilitychange', tick);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick); };
+  }, [!!data]);
   const meRec = myDevice(data, thisDev?.id);
   useEffect(() => {
     if (meRec?.status !== 'removed') return;

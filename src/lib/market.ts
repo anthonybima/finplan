@@ -63,6 +63,14 @@ async function yahoo(sym: string, rk: RangeKey): Promise<Series> {
   };
 }
 
+/** Latest price for a Yahoo symbol through the best route here (Pluang, FinPlan's server, the Claude connector, or Yahoo directly). */
+export async function livePrice(sym: string): Promise<number | null> {
+  for (const src of ['auto', 'yahoo'] as DataSource[]) {
+    try { const s = await getSeries(sym, '5D', true, src); if (s.price > 0) return s.price; } catch { /* next route */ }
+  }
+  return null;
+}
+
 /* ---------- Yahoo data through the FinPlan Cloud connector (inside Claude) ---------- */
 let connectorMarketOff = false; // connector not added: stop asking until reload
 async function connectorChart(sym: string, range: string, interval: string) {
