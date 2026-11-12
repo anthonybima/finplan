@@ -85,7 +85,7 @@ export interface CategoryRule { keyword: string; category: string }
 
 export interface RiskAnswers { horizon: number; reaction: number; experience: number; income: number; goal: number }
 
-export type WidgetType = 'quote' | 'ratio' | 'list';
+export type WidgetType = 'quote' | 'ratio' | 'list' | 'compare';
 export interface Widget {
   id: string; type: WidgetType; title: string; symbols: string[];
   range: '1D' | '5D' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | '5Y';
@@ -124,6 +124,7 @@ export interface Settings {
   privacyNoProxy?: boolean;
   newsV2?: boolean;
   dashboards?: MarketDashboard[];
+  marketsLayout?: number; // sample-layout version applied to saved dashboards
   activeDashboard?: string;
   lastBackupAt?: string;
   monthlyUpdate?: MonthlyReminder;

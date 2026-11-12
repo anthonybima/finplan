@@ -32,7 +32,7 @@ export const CATALOG: Instrument[] = [
   { sym: 'CPIN.JK', name: 'CPIN · Charoen Pokphand', group: 'Indonesia stocks', tv: 'IDX:CPIN', ccy: 'IDR', decimals: 0 },
   { sym: 'BRIS.JK', name: 'BRIS · Bank Syariah Indonesia', group: 'Indonesia stocks', tv: 'IDX:BRIS', ccy: 'IDR', decimals: 0 },
   // Indonesia & US indices
-  { sym: '^JKSE', name: 'IHSG (JCI)', group: 'Indices', tv: 'IDX:COMPOSITE', decimals: 2 },
+  { sym: '^JKSE', name: 'IDX Composite (JCI)', group: 'Indices', tv: 'IDX:COMPOSITE', decimals: 2 },
   { sym: '^JKLQ45', name: 'LQ45', group: 'Indices', tv: 'IDX:LQ45', decimals: 2 },
   { inv: 166, sym: '^GSPC', name: 'S&P 500', group: 'Indices', tv: 'SP:SPX', decimals: 2 },
   { sym: '^IXIC', name: 'Nasdaq Composite', group: 'Indices', tv: 'NASDAQ:IXIC', decimals: 2 },
@@ -48,7 +48,6 @@ export const CATALOG: Instrument[] = [
   { sym: 'VTI', name: 'Vanguard Total Market (VTI)', group: 'US ETFs', tv: 'AMEX:VTI', ccy: 'USD' },
   { sym: 'GLD', name: 'Gold ETF (GLD)', group: 'US ETFs', tv: 'AMEX:GLD', ccy: 'USD' },
   { sym: 'TLT', name: '20Y+ Treasury (TLT)', group: 'US ETFs', tv: 'NASDAQ:TLT', ccy: 'USD' },
-  { sym: 'EIDO', name: 'iShares MSCI Indonesia (EIDO)', group: 'US ETFs', tv: 'AMEX:EIDO', ccy: 'USD' },
   // Crypto
   { inv: 945629, sym: 'BTC-USD', name: 'Bitcoin (BTC/USD)', group: 'Crypto', tv: 'BITSTAMP:BTCUSD', ccy: 'USD' },
   { sym: 'ETH-USD', name: 'Ethereum (ETH/USD)', group: 'Crypto', tv: 'BITSTAMP:ETHUSD', ccy: 'USD' },
@@ -77,6 +76,27 @@ export const CATALOG: Instrument[] = [
   { sym: '^KLSE', name: 'KLCI (Malaysia)', group: 'Asia Pacific', tv: 'FTSEMYX:FBMKLCI', decimals: 2 },
   { sym: '^SET.BK', name: 'SET (Thailand)', group: 'Asia Pacific', tv: 'SET:SET', decimals: 2 },
   { sym: 'PSEI.PS', name: 'PSEi (Philippines)', group: 'Asia Pacific', tv: 'PSE:PSEI', decimals: 2 },
+  // MSCI country ETFs (US-listed, in USD): the MSCI equivalent of each Asia Pacific market
+  { sym: 'EIDO', name: 'iShares MSCI Indonesia (EIDO)', group: 'MSCI country ETFs', tv: 'AMEX:EIDO', ccy: 'USD' },
+  { sym: 'EWJ', name: 'iShares MSCI Japan (EWJ)', group: 'MSCI country ETFs', tv: 'AMEX:EWJ', ccy: 'USD' },
+  { sym: 'EWH', name: 'iShares MSCI Hong Kong (EWH)', group: 'MSCI country ETFs', tv: 'AMEX:EWH', ccy: 'USD' },
+  { sym: 'MCHI', name: 'iShares MSCI China (MCHI)', group: 'MSCI country ETFs', tv: 'NASDAQ:MCHI', ccy: 'USD' },
+  { sym: 'EWY', name: 'iShares MSCI South Korea (EWY)', group: 'MSCI country ETFs', tv: 'AMEX:EWY', ccy: 'USD' },
+  { sym: 'EWT', name: 'iShares MSCI Taiwan (EWT)', group: 'MSCI country ETFs', tv: 'AMEX:EWT', ccy: 'USD' },
+  { sym: 'EWS', name: 'iShares MSCI Singapore (EWS)', group: 'MSCI country ETFs', tv: 'AMEX:EWS', ccy: 'USD' },
+  { sym: 'EWA', name: 'iShares MSCI Australia (EWA)', group: 'MSCI country ETFs', tv: 'AMEX:EWA', ccy: 'USD' },
+  { sym: 'INDA', name: 'iShares MSCI India (INDA)', group: 'MSCI country ETFs', tv: 'BATS:INDA', ccy: 'USD' },
+  { sym: 'EWM', name: 'iShares MSCI Malaysia (EWM)', group: 'MSCI country ETFs', tv: 'AMEX:EWM', ccy: 'USD' },
+  { sym: 'THD', name: 'iShares MSCI Thailand (THD)', group: 'MSCI country ETFs', tv: 'NASDAQ:THD', ccy: 'USD' },
+  { sym: 'EPHE', name: 'iShares MSCI Philippines (EPHE)', group: 'MSCI country ETFs', tv: 'AMEX:EPHE', ccy: 'USD' },
+  { sym: 'AAXJ', name: 'iShares MSCI All Country Asia ex Japan (AAXJ)', group: 'MSCI country ETFs', tv: 'NASDAQ:AAXJ', ccy: 'USD' },
+];
+
+/** Each Asia Pacific index and its MSCI equivalent (US-listed iShares ETF), for side-by-side comparison. */
+export const ASIA_MSCI: [string, string, string][] = [
+  ['Indonesia', '^JKSE', 'EIDO'], ['Japan', '^N225', 'EWJ'], ['Hong Kong', '^HSI', 'EWH'], ['China', '000001.SS', 'MCHI'],
+  ['South Korea', '^KS11', 'EWY'], ['Taiwan', '^TWII', 'EWT'], ['Singapore', '^STI', 'EWS'], ['Australia', '^AXJO', 'EWA'],
+  ['India', '^NSEI', 'INDA'], ['Malaysia', '^KLSE', 'EWM'], ['Thailand', '^SET.BK', 'THD'], ['Philippines', 'PSEI.PS', 'EPHE'],
 ];
 
 export const findInstrument = (sym: string): Instrument => CATALOG.find((i) => i.sym === sym)

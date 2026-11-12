@@ -3,7 +3,7 @@ import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, RefreshCw, ExternalLink, Chec
 import type { ViewProps } from '../App';
 import type { MarketDashboard, Widget } from '../lib/types';
 import { alpacaCan, clearMarketCache, connectorAvailable, getRatio, getSeries, isIdx, pluangAvailable, pluangCan, RANGES, USE_TV, type DataSource, type RangeKey, type Series } from '../lib/market';
-import { ALGOBARS_URL, CATALOG, findInstrument, GROUPS, idxCode, investingChartUrl, stockbitUrl } from '../lib/marketCatalog';
+import { ALGOBARS_URL, ASIA_MSCI, CATALOG, findInstrument, GROUPS, idxCode, investingChartUrl, stockbitUrl } from '../lib/marketCatalog';
 import { uid } from '../lib/store';
 import { platform } from '../lib/net';
 import { Field, Modal, Seg, toast } from '../components/ui';
@@ -12,17 +12,42 @@ import TVWidget from '../components/TVWidget';
 
 const W = (type: Widget['type'], title: string, symbols: string[], range: RangeKey = '1D', size: Widget['size'] = 's', chart: Widget['chart'] = 'area'): Widget => ({ id: uid(), type, title, symbols, range, chart, size });
 
+export const MARKETS_LAYOUT = 2;
+const COMMODITIES: [string, string][] = [['Gold', 'GC=F'], ['Silver', 'SI=F'], ['Crude oil WTI', 'CL=F'], ['Brent crude', 'BZ=F'], ['Copper', 'HG=F'], ['Natural gas', 'NG=F'], ['Platinum', 'PL=F'], ['Wheat', 'ZW=F'], ['Coffee', 'KC=F']];
+const commoditiesDash = (): MarketDashboard => ({ id: 'commodities', name: 'Global commodities', refreshSec: 60, widgets: COMMODITIES.map(([t, sym]) => W('quote', t, [sym], '1M', 'm')) });
+const asiaDash = (): MarketDashboard => ({ id: 'asia', name: 'Asia Pacific vs MSCI', refreshSec: 60, widgets: [
+  W('list', 'Asia Pacific indices', ASIA_MSCI.map(([, idx]) => idx), '1D', 'm'),
+  W('list', 'MSCI equivalents (iShares, USD)', ASIA_MSCI.map(([, , etf]) => etf), '1D', 'm'),
+  ...ASIA_MSCI.map(([country, idx, etf]) => W('compare', `${country}: ${findInstrument(idx).name.replace(/ \(.*\)$/, '')} vs ${etf}`, [idx, etf], '1Y', 'm', 'line')),
+] });
 export function defaultDashboards(): MarketDashboard[] {
   return [{
     id: 'main', name: 'Markets', refreshSec: 60, widgets: [
-      W('quote', 'USD/IDR', ['USDIDR=X']), W('quote', 'SGD/IDR', ['SGDIDR=X']), W('quote', 'IHSG', ['^JKSE']), W('quote', 'QQQ', ['QQQ']),
+      W('quote', 'USD/IDR', ['USDIDR=X']), W('quote', 'SGD/IDR', ['SGDIDR=X']), W('quote', 'COMPOSITE IDX', ['^JKSE']), W('quote', 'EIDO', ['EIDO']), W('quote', 'QQQ', ['QQQ']),
       W('quote', 'S&P 500 (SPY)', ['SPY']), W('quote', 'SCHD', ['SCHD']), W('quote', 'BTC/USD', ['BTC-USD']), W('quote', 'ETH/USD', ['ETH-USD']),
       W('quote', 'RSP (Equal-weight S&P)', ['RSP'], '1M', 'm'), W('ratio', 'RSP / SPY (breadth)', ['RSP', 'SPY'], '1Y', 'm', 'line'),
-      W('list', 'Global commodities', ['GC=F', 'SI=F', 'CL=F', 'BZ=F', 'HG=F', 'NG=F'], '1D', 'm'),
       W('list', 'Indonesia blue chips', ['BBCA.JK', 'BBRI.JK', 'BMRI.JK', 'BBNI.JK', 'TLKM.JK', 'ASII.JK', 'GOTO.JK', 'ADRO.JK', 'ANTM.JK', 'AMMN.JK'], '1D', 'm'),
-      W('list', 'Asia Pacific indices', ['^JKSE', '^N225', '^HSI', '000001.SS', '^KS11', '^STI', '^AXJO', '^NSEI', '^TWII', '^KLSE', '^SET.BK'], '1D', 'l'),
     ],
-  }];
+  }, commoditiesDash(), asiaDash()];
+}
+/** Bring saved dashboards up to the current sample layout: IHSG → COMPOSITE IDX + EIDO; commodities and Asia Pacific get their own tabs. */
+export function upgradeDashboards(ds: MarketDashboard[]): MarketDashboard[] {
+  let out = ds.map((d) => {
+    const widgets: Widget[] = [];
+    for (const w of d.widgets) {
+      if (w.type === 'quote' && w.symbols[0] === '^JKSE' && /^(IHSG|JCI|IHSG \(JCI\))$/i.test(w.title.trim())) {
+        widgets.push({ ...w, title: 'COMPOSITE IDX' });
+        if (!d.widgets.some((x) => x.type === 'quote' && x.symbols[0] === 'EIDO')) widgets.push({ ...W('quote', 'EIDO', ['EIDO'], w.range, w.size, w.chart) });
+        continue;
+      }
+      if (d.id === 'main' && w.type === 'list' && /^(Global commodities|Asia Pacific indices)$/.test(w.title)) continue; // moved to their own tabs
+      widgets.push(w);
+    }
+    return { ...d, widgets };
+  });
+  if (!out.some((d) => d.id === 'commodities')) out = [...out, commoditiesDash()];
+  if (!out.some((d) => d.id === 'asia')) out = [...out, asiaDash()];
+  return out;
 }
 
 const tvOf = (w: Widget) => w.type === 'ratio' ? `${findInstrument(w.symbols[0]).tv || w.symbols[0]}/${findInstrument(w.symbols[1]).tv || w.symbols[1]}` : findInstrument(w.symbols[0]).tv || w.symbols[0];
@@ -124,6 +149,55 @@ function QuoteTile({ w, tick, onOpen, editTools }: { w: Widget; tick: number; on
   );
 }
 
+/** Two instruments rebased to 0% at the start of the range (e.g. an index and its MSCI ETF). */
+function CompareTile({ w, tick, onOpenSym, editTools }: { w: Widget; tick: number; onOpenSym: (sym: string) => void; editTools: JSX.Element | null }) {
+  const { data, err } = useSeries(w, tick);
+  const [a, b] = w.symbols; const A = data[a], B = data[b];
+  const colors = ['#0f766e', '#d97706'];
+  const tvFallback = (err[a] === USE_TV || err[b] === USE_TV) && !(A && B);
+  const geo = useMemo(() => {
+    if (!A || !B || A.points.length < 2 || B.points.length < 2) return null;
+    const rb = (pts: { t: number; c: number }[]) => pts.map((p) => ({ t: p.t, v: p.c / pts[0].c - 1 }));
+    const sa = rb(A.points), sb = rb(B.points);
+    const t0 = Math.min(sa[0].t, sb[0].t), t1 = Math.max(sa[sa.length - 1].t, sb[sb.length - 1].t) || t0 + 1;
+    const all = [...sa, ...sb].map((p) => p.v); const lo = Math.min(0, ...all), hi = Math.max(0, ...all), span = hi - lo || 0.01;
+    const X = (t: number) => ((t - t0) / (t1 - t0 || 1)) * 600, Y = (v: number) => 6 + (1 - (v - lo) / span) * 98;
+    const path = (s: { t: number; v: number }[]) => s.map((p, i) => `${i ? 'L' : 'M'}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join('');
+    return { pa: path(sa), pb: path(sb), y0: Y(0), ra: sa[sa.length - 1].v, rbv: sb[sb.length - 1].v };
+  }, [A, B]);
+  const tvSym = (s: string) => findInstrument(s).tv || s;
+  return (
+    <div className={`tile mk-${w.size}`} style={{ cursor: 'default' }}>
+      {editTools}
+      <div className="row between" style={{ flexWrap: 'nowrap', alignItems: 'flex-start' }}>
+        <div style={{ minWidth: 0 }}><div className="tname">{w.title}</div><div className="tsym">{findInstrument(a).name} vs {findInstrument(b).name}</div></div>
+        <span className="pill" style={{ fontSize: 11 }}>{w.range}</span>
+      </div>
+      {geo ? (<>
+        <div className="row" style={{ gap: 14, marginTop: 6, flexWrap: 'wrap' }}>
+          {[[a, geo.ra, A!], [b, geo.rbv, B!]].map(([sym, r, S], i) => (
+            <button key={String(sym)} className="btn ghost sm" style={{ padding: '2px 4px' }} onClick={() => onOpenSym(String(sym))}>
+              <span style={{ display: 'inline-block', width: 10, height: 3, background: colors[i], borderRadius: 2, marginRight: 6, verticalAlign: 3 }} />
+              <b>{String(sym).replace(/^\^/, '')}</b>&nbsp;<span className={`chg ${dir(r as number)}`} style={{ fontSize: 13 }}>{pctTxt(r as number)}</span>
+              <span className="small muted">&nbsp;{fmtPrice((S as Series).price, String(sym))}</span>
+            </button>))}
+        </div>
+        <svg viewBox="0 0 600 110" preserveAspectRatio="none" width="100%" height={110} style={{ display: 'block', marginTop: 4 }}>
+          <line x1="0" x2="600" y1={geo.y0} y2={geo.y0} stroke="var(--muted)" strokeDasharray="4 4" strokeWidth="1" vectorEffect="non-scaling-stroke" opacity="0.6" />
+          <path d={geo.pa} fill="none" stroke={colors[0]} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+          <path d={geo.pb} fill="none" stroke={colors[1]} strokeWidth="2" vectorEffect="non-scaling-stroke" />
+        </svg>
+        <div className="small muted" style={{ fontSize: 11, marginTop: 4 }}>Gap {pctTxt(geo.ra - geo.rbv)} over {w.range} · index in local currency, ETF in USD (the gap includes the currency move)</div>
+      </>) : tvFallback ? (IN_CLAUDE()
+        ? <div className="small muted" style={{ padding: '14px 0' }}>The comparison chart loads in the FinPlan app. <a href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSym(a))}`} target="_blank" rel="noreferrer">{tvSym(a)}</a> · <a href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSym(b))}`} target="_blank" rel="noreferrer">{tvSym(b)}</a> on TradingView ↗</div>
+        : <div style={{ marginTop: 8 }}><TVWidget type="advanced-chart" height={300} config={{ symbol: tvSym(a), compareSymbols: [{ symbol: tvSym(b), position: 'SameScale' }], interval: 'D', range: tvRange(w.range), style: '2', hide_top_toolbar: true, hide_legend: false, allow_symbol_change: false, hide_volume: true, autosize: true, support_host: 'https://www.tradingview.com' }} />
+            <div className="small muted" style={{ fontSize: 11 }}>TradingView · % change, same scale</div></div>)
+      : (err[a] || err[b]) ? <div className="small muted" style={{ padding: '18px 0' }}>{errText(err[a] || err[b], a)}</div>
+      : <div className="small muted" style={{ padding: '24px 0' }}>Loading…</div>}
+    </div>
+  );
+}
+
 function ListTile({ w, tick, onOpenSym, editTools }: { w: Widget; tick: number; onOpenSym: (sym: string) => void; editTools: JSX.Element | null }) {
   const { data, err } = useSeries(w, tick);
   return (
@@ -166,6 +240,10 @@ export default function Markets({ data, update }: ViewProps) {
   const [hasPluang, setHasPluang] = useState(false);
   useEffect(() => { connectorAvailable().then((m) => setInClaude(!!m)); pluangAvailable().then(setHasPluang); }, []);
 
+  useEffect(() => { // one-time upgrade of saved dashboards to the current sample layout
+    if (!data.settings.dashboards?.length || (data.settings.marketsLayout ?? 1) >= MARKETS_LAYOUT) return;
+    update((d) => ({ ...d, settings: { ...d.settings, dashboards: upgradeDashboards(d.settings.dashboards || []), marketsLayout: MARKETS_LAYOUT } }));
+  }, [data.settings.marketsLayout]);
   const save = useCallback((ds: MarketDashboard[], activeId = active.id) => update((d) => ({ ...d, settings: { ...d.settings, dashboards: ds, activeDashboard: activeId } })), [update, active.id]);
   const saveActive = (fn: (d: MarketDashboard) => MarketDashboard) => save(dashboards.map((d) => (d.id === active.id ? fn(d) : d)));
 
@@ -208,7 +286,7 @@ export default function Markets({ data, update }: ViewProps) {
             <select className="input" style={{ width: 'auto' }} value={active.refreshSec} onChange={(e) => saveActive((x) => ({ ...x, refreshSec: Number(e.target.value) }))}>
               {[[15, 'Every 15s'], [30, 'Every 30s'], [60, 'Every 1 min'], [300, 'Every 5 min'], [0, 'Manual']].map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
-            <button className="btn sm" onClick={() => { save(defaultDashboards().map((d) => ({ ...d, id: active.id, name: active.name })).concat(dashboards.filter((d) => d.id !== active.id)), active.id); toast('Sample layout restored'); }}>Reset to sample</button>
+            <button className="btn sm" onClick={() => { { const def = defaultDashboards(); const pick = def.find((d) => d.id === active.id) || def[0]; save(dashboards.map((d) => (d.id === active.id ? { ...pick, id: active.id, name: active.name } : d)), active.id); } toast('Sample layout restored'); }}>Reset to sample</button>
             {dashboards.length > 1 && <button className="btn sm danger" onClick={() => { const rest = dashboards.filter((d) => d.id !== active.id); save(rest, rest[0].id); }}><Trash2 size={14} /> Delete dashboard</button>}
           </div>
         )}
@@ -226,7 +304,9 @@ export default function Markets({ data, update }: ViewProps) {
       )}
 
       <div className="mk-grid">
-        {active.widgets.map((w, i) => w.type === 'list'
+        {active.widgets.map((w, i) => w.type === 'compare'
+          ? <CompareTile key={w.id} w={w} tick={tick} editTools={tools(w, i)} onOpenSym={(sym) => setDetail({ ...W('quote', findInstrument(sym).name, [sym], '1M', 'l'), id: 'tmp' })} />
+          : w.type === 'list'
           ? <ListTile key={w.id} w={w} tick={tick} editTools={tools(w, i)} onOpenSym={(sym) => setDetail({ ...W('quote', findInstrument(sym).name, [sym], '1M', 'l'), id: 'tmp' })} />
           : <QuoteTile key={w.id} w={w} tick={tick} editTools={tools(w, i)} onOpen={() => !edit && setDetail(w)} />)}
         {edit && <button className="tile mk-s" style={{ borderStyle: 'dashed', display: 'grid', placeItems: 'center', minHeight: 140, color: 'var(--brand)', fontWeight: 700 }} onClick={() => setEditing('new')}><span><Plus size={20} style={{ verticalAlign: -4 }} /> Add widget</span></button>}
@@ -311,7 +391,7 @@ function WidgetEditor({ w, inClaude, onClose, onSave }: { w?: Widget; inClaude: 
   const [x, setX] = useState<Widget>(w ?? W('quote', '', [], '1D', 's'));
   const [q, setQ] = useState(''); const [custom, setCustom] = useState(''); const [idx, setIdx] = useState('');
   const set = (p: Partial<Widget>) => setX((y) => ({ ...y, ...p }));
-  const max = x.type === 'quote' ? 1 : x.type === 'ratio' ? 2 : 30;
+  const max = x.type === 'quote' ? 1 : x.type === 'ratio' || x.type === 'compare' ? 2 : 30;
   const toggle = (sym: string) => {
     const has = x.symbols.includes(sym);
     let symbols = has ? x.symbols.filter((s) => s !== sym) : [...x.symbols, sym];
@@ -320,12 +400,12 @@ function WidgetEditor({ w, inClaude, onClose, onSave }: { w?: Widget; inClaude: 
     set({ symbols, title: max === 1 && !has ? findInstrument(sym).name : title });
   };
   const list = useMemo(() => CATALOG.filter((i) => !q || (i.name + i.sym + i.group).toLowerCase().includes(q.toLowerCase())), [q]);
-  const ok = x.symbols.length >= (x.type === 'ratio' ? 2 : 1);
+  const ok = x.symbols.length >= (x.type === 'ratio' || x.type === 'compare' ? 2 : 1);
   return (
     <Modal title={w ? 'Edit widget' : 'Add widget'} onClose={onClose} wide>
       <div className="form">
-        <div className="full"><Seg value={x.type} onChange={(type) => set({ type, symbols: x.symbols.slice(0, type === 'quote' ? 1 : type === 'ratio' ? 2 : 30), size: type === 'list' ? 'm' : x.size })}
-          options={[{ v: 'quote', l: 'Chart (1 symbol)' }, { v: 'ratio', l: 'Ratio A ÷ B' }, { v: 'list', l: 'Watchlist' }]} /></div>
+        <div className="full"><Seg value={x.type} onChange={(type) => set({ type, symbols: x.symbols.slice(0, type === 'quote' ? 1 : type === 'ratio' || type === 'compare' ? 2 : 30), size: type === 'list' ? 'm' : x.size })}
+          options={[{ v: 'quote', l: 'Chart (1 symbol)' }, { v: 'compare', l: 'Compare A vs B' }, { v: 'ratio', l: 'Ratio A ÷ B' }, { v: 'list', l: 'Watchlist' }]} /></div>
         <Field label="Title"><input className="input" value={x.title} onChange={(e) => set({ title: e.target.value })} placeholder={x.type === 'ratio' ? 'e.g. RSP / SPY' : 'e.g. Gold'} /></Field>
         <Field label="Time range"><select className="input" value={x.range} onChange={(e) => set({ range: e.target.value as RangeKey })}>{RANGES.map((r) => <option key={r}>{r}</option>)}</select></Field>
         {x.type !== 'list' && <Field label="Chart style"><select className="input" value={x.chart} onChange={(e) => set({ chart: e.target.value as Widget['chart'] })}><option value="area">Area</option><option value="line">Line</option><option value="candle">Candles</option></select></Field>}
@@ -339,7 +419,7 @@ function WidgetEditor({ w, inClaude, onClose, onSave }: { w?: Widget; inClaude: 
           <input className="input" type="number" value={x.invPair ?? ''} placeholder={x.symbols[0] && findInstrument(x.symbols[0]).inv ? String(findInstrument(x.symbols[0]).inv) : 'e.g. 8830 for Gold'} onChange={(e) => set({ invPair: e.target.value ? Number(e.target.value) : undefined })} /></Field>}
       </div>
       {x.source === 'alpaca' && x.symbols.some((sy) => !alpacaCan(sy)) && <div className="small neg mt-s">Alpaca covers US stocks/ETFs and crypto only: {x.symbols.filter((sy) => !alpacaCan(sy)).join(', ')} won't load from Alpaca.</div>}
-      <div className="mt"><b>{x.type === 'quote' ? 'Pick a symbol' : x.type === 'ratio' ? 'Pick 2 symbols (A, then B)' : 'Pick symbols'}</b> <span className="small muted">· selected: {x.symbols.join(x.type === 'ratio' ? ' ÷ ' : ', ') || 'none'}</span></div>
+      <div className="mt"><b>{x.type === 'quote' ? 'Pick a symbol' : x.type === 'ratio' || x.type === 'compare' ? 'Pick 2 symbols (A, then B)' : 'Pick symbols'}</b> <span className="small muted">· selected: {x.symbols.join(x.type === 'ratio' ? ' ÷ ' : x.type === 'compare' ? ' vs ' : ', ') || 'none'}</span></div>
       <div className="row mt-s">
         <div style={{ position: 'relative', flex: '1 1 200px' }}><Search size={15} style={{ position: 'absolute', left: 10, top: 11, color: 'var(--muted)' }} />
           <input className="input" style={{ paddingLeft: 30 }} placeholder="Search: gold, nikkei, BTC, IDR…" value={q} onChange={(e) => setQ(e.target.value)} /></div>
@@ -360,7 +440,7 @@ function WidgetEditor({ w, inClaude, onClose, onSave }: { w?: Widget; inClaude: 
       </div>
       <div className="small muted mt-s">·P = charted from Pluang data · ·TV = TradingView live chart (Pluang doesn't list it){inClaude ? '; TradingView charts open from the app or tradingview.com' : ''}.</div>
       <div className="row between mt"><button className="btn" onClick={onClose}><X size={16} /> Cancel</button>
-        <button className="btn primary" disabled={!ok} onClick={() => onSave({ ...x, title: x.title || (x.type === 'ratio' ? `${x.symbols[0]} / ${x.symbols[1]}` : findInstrument(x.symbols[0]).name) })}><Check size={16} /> Save widget</button></div>
+        <button className="btn primary" disabled={!ok} onClick={() => onSave({ ...x, title: x.title || (x.type === 'ratio' ? `${x.symbols[0]} / ${x.symbols[1]}` : x.type === 'compare' ? `${x.symbols[0]} vs ${x.symbols[1]}` : findInstrument(x.symbols[0]).name) })}><Check size={16} /> Save widget</button></div>
     </Modal>
   );
 }
