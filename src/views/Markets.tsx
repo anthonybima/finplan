@@ -12,7 +12,16 @@ import TVWidget from '../components/TVWidget';
 
 const W = (type: Widget['type'], title: string, symbols: string[], range: RangeKey = '1D', size: Widget['size'] = 's', chart: Widget['chart'] = 'area'): Widget => ({ id: uid(), type, title, symbols, range, chart, size });
 
-export const MARKETS_LAYOUT = 3;
+export const MARKETS_LAYOUT = 4;
+/** Macro charts on the main tab: dollar, size, growth vs value, stocks vs gold. */
+const MACRO_WIDGETS = (): Widget[] => [
+  W('quote', 'DXY (US Dollar Index)', ['DX-Y.NYB'], '1M', 'm'),
+  W('ratio', 'IWM / SPY (small vs large caps)', ['IWM', 'SPY'], '1Y', 'm', 'line'),
+  W('ratio', 'IWM / QQQ (small caps vs Nasdaq 100)', ['IWM', 'QQQ'], '1Y', 'm', 'line'),
+  W('ratio', 'SPY / Gold (GLD)', ['SPY', 'GLD'], '1Y', 'm', 'line'),
+  W('ratio', 'S&P 500 / Nasdaq Composite (INX / IXIC)', ['^GSPC', '^IXIC'], '1Y', 'm', 'line'),
+];
+const wKey = (w: Widget) => `${w.type}:${w.symbols.join('/')}`;
 const COMMODITIES: [string, string][] = [['Gold', 'GC=F'], ['Silver', 'SI=F'], ['Crude oil WTI', 'CL=F'], ['Brent crude', 'BZ=F'], ['Copper', 'HG=F'], ['Natural gas', 'NG=F'], ['Platinum', 'PL=F'], ['Wheat', 'ZW=F'], ['Coffee', 'KC=F']];
 const commoditiesDash = (): MarketDashboard => ({ id: 'commodities', name: 'Global commodities', refreshSec: 60, widgets: COMMODITIES.map(([t, sym]) => W('quote', t, [sym], '1M', 'm')) });
 /** A region tab: index watchlist, MSCI ETF watchlist, then one index-vs-ETF comparison per market. */
@@ -28,7 +37,7 @@ export function defaultDashboards(): MarketDashboard[] {
     id: 'main', name: 'Markets', refreshSec: 60, widgets: [
       W('quote', 'USD/IDR', ['USDIDR=X']), W('quote', 'SGD/IDR', ['SGDIDR=X']), W('quote', 'COMPOSITE IDX', ['^JKSE']), W('quote', 'EIDO', ['EIDO']), W('quote', 'QQQ', ['QQQ']),
       W('quote', 'S&P 500 (SPY)', ['SPY']), W('quote', 'SCHD', ['SCHD']), W('quote', 'BTC/USD', ['BTC-USD']), W('quote', 'ETH/USD', ['ETH-USD']),
-      W('quote', 'RSP (Equal-weight S&P)', ['RSP'], '1M', 'm'), W('ratio', 'RSP / SPY (breadth)', ['RSP', 'SPY'], '1Y', 'm', 'line'),
+      W('quote', 'RSP (Equal-weight S&P)', ['RSP'], '1M', 'm'), W('ratio', 'RSP / SPY (breadth)', ['RSP', 'SPY'], '1Y', 'm', 'line'), ...MACRO_WIDGETS(),
       W('list', 'Indonesia blue chips', ['BBCA.JK', 'BBRI.JK', 'BMRI.JK', 'BBNI.JK', 'TLKM.JK', 'ASII.JK', 'GOTO.JK', 'ADRO.JK', 'ANTM.JK', 'AMMN.JK'], '1D', 'm'),
     ],
   }, commoditiesDash(), asiaDash(), europeDash()];
@@ -46,6 +55,7 @@ export function upgradeDashboards(ds: MarketDashboard[]): MarketDashboard[] {
       if (d.id === 'main' && w.type === 'list' && /^(Global commodities|Asia Pacific indices)$/.test(w.title)) continue; // moved to their own tabs
       widgets.push(w);
     }
+    if (d.id === 'main') { const have = new Set(widgets.map(wKey)); widgets.push(...MACRO_WIDGETS().filter((w) => !have.has(wKey(w)))); }
     return { ...d, widgets };
   });
   if (!out.some((d) => d.id === 'commodities')) out = [...out, commoditiesDash()];

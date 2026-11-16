@@ -46,6 +46,7 @@ export const CATALOG: Instrument[] = [
   { sym: 'RSP', name: 'S&P 500 Equal Weight (RSP)', group: 'US ETFs', tv: 'AMEX:RSP', ccy: 'USD' },
   { sym: 'VOO', name: 'Vanguard S&P 500 (VOO)', group: 'US ETFs', tv: 'AMEX:VOO', ccy: 'USD' },
   { sym: 'VTI', name: 'Vanguard Total Market (VTI)', group: 'US ETFs', tv: 'AMEX:VTI', ccy: 'USD' },
+  { sym: 'IWM', name: 'iShares Russell 2000 (IWM)', group: 'US ETFs', tv: 'AMEX:IWM', ccy: 'USD' },
   { sym: 'GLD', name: 'Gold ETF (GLD)', group: 'US ETFs', tv: 'AMEX:GLD', ccy: 'USD' },
   { sym: 'TLT', name: '20Y+ Treasury (TLT)', group: 'US ETFs', tv: 'NASDAQ:TLT', ccy: 'USD' },
   // Crypto
