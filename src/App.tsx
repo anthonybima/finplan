@@ -18,6 +18,7 @@ import ImportData from './components/ImportData';
 import AskClaude from './views/AskClaude';
 import { SyncProvider, SyncChip, WelcomeSyncButton } from './components/Sync';
 import { DevicePending, PendingDevicesBanner } from './components/Devices';
+import { UpdateBanner } from './components/UpdateBanner';
 import { myDevice, registerDevice, type ThisDevice } from './lib/devices';
 import { getDevice, removeLocalUser } from './lib/auth';
 import { revalueFx } from './lib/fx';
@@ -81,9 +82,10 @@ export default function App({ session, initial, persist, onLock, onSignOut }: Ap
   const dataRef = useRef(data); dataRef.current = data;
   useEffect(() => {
     if (!data) return;
-    const tick = () => { const d = dataRef.current; if (d && !document.hidden && liveStale(d)) refreshLive(d, update).catch(() => {}); };
-    tick(); const t = setInterval(tick, 60e3); document.addEventListener('visibilitychange', tick);
-    return () => { clearInterval(t); document.removeEventListener('visibilitychange', tick); };
+    const tick = (force = false) => { const d = dataRef.current; if (d && !document.hidden && (force || liveStale(d))) refreshLive(d, update).catch(() => {}); };
+    tick(true); // every sign-in starts with fresh prices and rates
+    const onTick = () => tick(); const t = setInterval(onTick, 60e3); document.addEventListener('visibilitychange', onTick);
+    return () => { clearInterval(t); document.removeEventListener('visibilitychange', onTick); };
   }, [!!data]);
   const meRec = myDevice(data, thisDev?.id);
   useEffect(() => {
@@ -193,6 +195,7 @@ export default function App({ session, initial, persist, onLock, onSignOut }: Ap
 
       <main>
         <div className="sync-mobile"><SyncChip /></div>
+        <UpdateBanner />
         <PendingDevicesBanner data={data} update={update} me={thisDev} />
         {rem && (page === 'home' || page === 'wealth') && <MonthlyBanner state={rem} data={data} update={update} onOpen={() => setMonthlyOpen(true)} />}
         {views[page]}

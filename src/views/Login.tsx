@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { newVersionAvailable, reloadToLatest } from '../lib/version';
 import { Lock, Plus, KeyRound, ArrowLeft, Copy, ShieldCheck, Monitor, Eye, EyeOff, Cloud } from 'lucide-react';
 import { createUser, getDevice, hasLegacyData, listUsers, loadVault, login, passwordProblems, recoverWithCode, saveVault, secondsLocked, type DeviceInfo, type Session, type UserRec } from '../lib/auth';
 import * as G from '../lib/gdrive';
@@ -43,6 +44,8 @@ export default function Login({ onSession, lockedUser }: { onSession: (s: Sessio
   const [lock, setLock] = useState(0);
   const [notice] = useState(() => { try { const n = sessionStorage.getItem('finplan.removedNotice'); if (n) sessionStorage.removeItem('finplan.removedNotice'); return n; } catch { return null; } });
   const [, bumpCloud] = useState(0);
+  const [updating, setUpdating] = useState(false);
+  useEffect(() => { newVersionAvailable().then((v) => { if (v) { setUpdating(true); reloadToLatest().then((ok) => { if (!ok) setUpdating(false); }); } }); }, []); // every sign-in starts on the newest version
   useEffect(() => { getDevice().then(setDevice); const off = onClaudeStore(() => bumpCloud((n) => n + 1)); return () => { off(); }; }, []);
   // ---- use an account from another device (its cloud copy) ----
   const cloudOk = G.driveSyncSupported();
@@ -100,6 +103,7 @@ export default function Login({ onSession, lockedUser }: { onSession: (s: Sessio
     if (code) { setPending({ session, migrated: null, code }); go('showCode'); } else onSession(session, null);
   });
 
+  if (updating) return <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 16 }}><div className="card" style={{ padding: 24, textAlign: 'center' }}>Updating FinPlan to the newest version…</div></div>;
   return (
     <div style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', padding: 16 }}>
       <div className="card" style={{ width: 'min(440px, 100%)', padding: 26 }}>
