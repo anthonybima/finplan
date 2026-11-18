@@ -3,7 +3,7 @@ import { Plus, Pencil, Trash2, ArrowUp, ArrowDown, RefreshCw, ExternalLink, Chec
 import type { ViewProps } from '../App';
 import type { MarketDashboard, Widget } from '../lib/types';
 import { alpacaCan, clearMarketCache, connectorAvailable, getRatio, getSeries, isIdx, pluangAvailable, pluangCan, RANGES, USE_TV, type DataSource, type RangeKey, type Series } from '../lib/market';
-import { ALGOBARS_URL, ASIA_MSCI, EUROPE_MSCI, tvWidgetOk, type MsciPair, CATALOG, findInstrument, GROUPS, idxCode, investingChartUrl, stockbitUrl } from '../lib/marketCatalog';
+import { ASIA_MSCI, EUROPE_MSCI, tvWidgetOk, type MsciPair, CATALOG, findInstrument, GROUPS, idxCode, stockbitUrl } from '../lib/marketCatalog';
 import { uid } from '../lib/store';
 import { platform } from '../lib/net';
 import { Field, Modal, Seg, toast } from '../components/ui';
@@ -12,7 +12,7 @@ import TVWidget from '../components/TVWidget';
 
 const W = (type: Widget['type'], title: string, symbols: string[], range: RangeKey = '1D', size: Widget['size'] = 's', chart: Widget['chart'] = 'area'): Widget => ({ id: uid(), type, title, symbols, range, chart, size });
 
-export const MARKETS_LAYOUT = 4;
+export const MARKETS_LAYOUT = 5;
 /** Macro charts on the main tab: dollar, size, growth vs value, stocks vs gold. */
 const MACRO_WIDGETS = (): Widget[] => [
   W('quote', 'DXY (US Dollar Index)', ['DX-Y.NYB'], '1M', 'm'),
@@ -46,7 +46,8 @@ export function defaultDashboards(): MarketDashboard[] {
 export function upgradeDashboards(ds: MarketDashboard[]): MarketDashboard[] {
   let out = ds.map((d) => {
     const widgets: Widget[] = [];
-    for (const w of d.widgets) {
+    for (const w0 of d.widgets) {
+      const w = (w0.view as string) === 'investing' ? { ...w0, view: 'native' as const, invPair: undefined } : w0; // Investing.com charts removed
       if (w.type === 'quote' && w.symbols[0] === '^JKSE' && /^(IHSG|JCI|IHSG \(JCI\))$/i.test(w.title.trim())) {
         widgets.push({ ...w, title: 'COMPOSITE IDX' });
         if (!d.widgets.some((x) => x.type === 'quote' && x.symbols[0] === 'EIDO')) widgets.push({ ...W('quote', 'EIDO', ['EIDO'], w.range, w.size, w.chart) });
@@ -104,18 +105,6 @@ function errText(e: string, sym: string) {
   return platform() === 'web' && /CORS|Failed to fetch|HTTP/i.test(e) ? 'Market feed unreachable (privacy mode or network)' : e.slice(0, 80);
 }
 
-const invPairOf = (w: Widget) => w.invPair || findInstrument(w.symbols[0]).inv;
-
-export function InvestingChart({ pair, height }: { pair?: number; height: number }) {
-  if (!pair) return <div className="small muted" style={{ height, display: 'grid', placeItems: 'center', textAlign: 'center' }}>Set the Investing.com pair ID in the widget settings<br />(Investing.com → Webmaster Tools → Technical Charts).</div>;
-  return (
-    <div>
-      <iframe title="Investing.com chart" src={investingChartUrl(pair)} style={{ width: '100%', height, border: 0, borderRadius: 8 }} loading="lazy"
-        referrerPolicy="no-referrer" sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox" />
-      <div className="small muted" style={{ fontSize: 11 }}>Chart by <a href="https://www.investing.com" target="_blank" rel="noreferrer">Investing.com</a></div>
-    </div>
-  );
-}
 
 const tvRange = (r: RangeKey) => ({ '1D': '1D', '5D': '5D', '1M': '1M', '3M': '3M', '6M': '6M', YTD: 'YTD', '1Y': '12M', '5Y': '60M' } as const)[r];
 const IN_CLAUDE = () => !!(window as any).claude;
@@ -148,8 +137,7 @@ function QuoteTile({ w, tick, onOpen, editTools }: { w: Widget; tick: number; on
         <div style={{ minWidth: 0 }}><div className="tname">{w.title}</div><div className="tsym">{w.type === 'ratio' ? `${w.symbols[0]} ÷ ${w.symbols[1]}` : inst.name !== w.title ? inst.name : w.symbols[0]}</div></div>
         <span className="pill" style={{ fontSize: 11 }}>{w.range}</span>
       </div>
-      {w.view === 'investing' && w.type === 'quote' ? <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}><InvestingChart pair={invPairOf(w)} height={h + 120} /></div>
-      : w.view === 'tradingview' && w.type === 'quote' ? <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}><TVWidget type="mini-symbol-overview" height={h + 120} config={{ symbol: tvOf(w), width: '100%', height: '100%', dateRange: w.range === '1D' ? '1D' : w.range === '5D' ? '5D' : w.range === '1M' ? '1M' : w.range === '3M' ? '3M' : w.range === '6M' ? '6M' : w.range === 'YTD' ? 'YTD' : w.range === '1Y' ? '12M' : '60M', chartOnly: false }} /></div>
+      {w.view === 'tradingview' && w.type === 'quote' ? <div style={{ marginTop: 8 }} onClick={(e) => e.stopPropagation()}><TVWidget type="mini-symbol-overview" height={h + 120} config={{ symbol: tvOf(w), width: '100%', height: '100%', dateRange: w.range === '1D' ? '1D' : w.range === '5D' ? '5D' : w.range === '1M' ? '1M' : w.range === '3M' ? '3M' : w.range === '6M' ? '6M' : w.range === 'YTD' ? 'YTD' : w.range === '1Y' ? '12M' : '60M', chartOnly: false }} /></div>
       : e === USE_TV && !s ? <div style={{ marginTop: 8 }}><TvFallback w={w} height={h} /></div>
       : s ? (<>
         <div className="tprice">{fmtPrice(s.price, key)}{s.currency && s.currency !== 'USD' && w.type !== 'ratio' && !key.includes('IDR') && !key.startsWith('^') ? <span className="small muted"> {s.currency}</span> : null}</div>
@@ -340,7 +328,7 @@ export default function Markets({ data, update }: ViewProps) {
 function DetailModal({ w, onClose }: { w: Widget; onClose: () => void }) {
   const [range, setRange] = useState<RangeKey>(w.range === '1D' && w.type === 'quote' ? '1D' : w.range);
   const [kind, setKind] = useState<Widget['chart']>(w.chart);
-  const [provider, setProvider] = useState<'native' | 'tradingview' | 'investing'>(w.view && w.view !== 'native' ? w.view : 'native');
+  const [provider, setProvider] = useState<'native' | 'tradingview'>(w.view === 'tradingview' ? 'tradingview' : 'native');
   const [src, setSrc] = useState<DataSource>((w.source as DataSource) || 'auto');
   const [s, setS] = useState<Series | null>(null); const [e, setE] = useState('');
   const [y1, setY1] = useState<Series | null>(null);
@@ -364,17 +352,15 @@ function DetailModal({ w, onClose }: { w: Widget; onClose: () => void }) {
         </div>
         <div className="row">
           {provider === 'native' && <select className="input" style={{ width: 'auto' }} value={src} onChange={(e) => setSrc(e.target.value as DataSource)} aria-label="Data source">
-            <option value="auto">Data: Auto (Pluang → TradingView)</option><option value="pluang" disabled={!w.symbols.every(pluangCan)}>Data: Pluang</option><option value="yahoo">Data: Yahoo Finance</option><option value="alpaca" disabled={!w.symbols.every(alpacaCan)}>Data: Alpaca</option></select>}
+            <option value="auto">Data: Auto (Pluang → Yahoo → TradingView)</option><option value="pluang" disabled={!w.symbols.every(pluangCan)}>Data: Pluang</option><option value="yahoo">Data: Yahoo Finance</option><option value="alpaca" disabled={!w.symbols.every(alpacaCan)}>Data: Alpaca</option></select>}
           {provider === 'native' && <Seg value={kind} onChange={setKind} options={[{ v: 'area', l: 'Area' }, { v: 'line', l: 'Line' }, { v: 'candle', l: 'Candles' }]} />}
         </div>
       </div>
       <div className="row mt-s" style={{ gap: 6 }}>
-        <Seg value={provider} onChange={setProvider} options={[{ v: 'native', l: 'FinPlan chart' }, { v: 'tradingview', l: 'TradingView' }, { v: 'investing', l: 'Investing.com' }]} />
+        <Seg value={provider} onChange={setProvider} options={[{ v: 'native', l: 'FinPlan chart' }, { v: 'tradingview', l: 'TradingView' }]} />
         {w.type === 'quote' && isIdx(w.symbols[0]) && <a className="btn sm" href={stockbitUrl(w.symbols[0])} target="_blank" rel="noreferrer" title="Stockbit has no public chart API; opens the stock in Stockbit"><ExternalLink size={14} /> Stockbit</a>}
-        <a className="btn sm" href={ALGOBARS_URL} target="_blank" rel="noreferrer" title="AlgoBars has no public chart API; opens their platform"><ExternalLink size={14} /> AlgoBars</a>
       </div>
       {provider === 'tradingview' && <div className="mt-s"><TVWidget type="advanced-chart" height={460} config={{ symbol: tvSym, interval: 'D', timezone: 'Asia/Jakarta', style: '1', allow_symbol_change: true, autosize: true, support_host: 'https://www.tradingview.com' }} /></div>}
-      {provider === 'investing' && <div className="mt-s">{w.type === 'ratio' ? <div className="empty">Investing.com charts show one instrument. Pick a single-symbol widget.</div> : <InvestingChart pair={invPairOf(w)} height={460} />}</div>}
       {provider === 'native' && <>
       <div className="range-chips mt-s">{RANGES.map((r) => <button key={r} className={r === range ? 'on' : ''} onClick={() => setRange(r)}>{r}</button>)}</div>
       <div className="mt-s">
@@ -396,7 +382,7 @@ function DetailModal({ w, onClose }: { w: Widget; onClose: () => void }) {
       )}
       </>}
       <div className="row between mt">
-        <span className="small muted">{provider === 'native' ? 'Delayed quotes; for trading use your broker.' : provider === 'investing' ? 'Live chart from Investing.com (official widget).' : 'Live chart from TradingView (official widget).'}</span>
+        <span className="small muted">{provider === 'native' ? 'Delayed quotes; for trading use your broker.' : 'Live chart from TradingView (official widget).'}</span>
         <a className="btn sm" href={`https://www.tradingview.com/chart/?symbol=${encodeURIComponent(tvSym)}`} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Open on TradingView</a>
       </div>
     </Modal>
@@ -430,9 +416,7 @@ function WidgetEditor({ w, inClaude, onClose, onSave }: { w?: Widget; inClaude: 
           <option value="auto">Auto: Pluang, then Yahoo Finance, then TradingView</option><option value="pluang">Pluang only</option><option value="yahoo">Yahoo Finance</option>
           <option value="alpaca">Alpaca Markets (US stocks/ETFs, crypto)</option></select></Field>
         {x.type === 'quote' && <Field label="Chart drawn by"><select className="input" value={x.view || 'native'} onChange={(e) => set({ view: e.target.value as Widget['view'] })}>
-          <option value="native">FinPlan (uses the data source)</option><option value="tradingview">TradingView live widget</option><option value="investing">Investing.com live chart</option></select></Field>}
-        {x.type === 'quote' && x.view === 'investing' && <Field label={`Investing.com pair ID${x.symbols[0] && findInstrument(x.symbols[0]).inv ? ` (default ${findInstrument(x.symbols[0]).inv})` : ''}`}>
-          <input className="input" type="number" value={x.invPair ?? ''} placeholder={x.symbols[0] && findInstrument(x.symbols[0]).inv ? String(findInstrument(x.symbols[0]).inv) : 'e.g. 8830 for Gold'} onChange={(e) => set({ invPair: e.target.value ? Number(e.target.value) : undefined })} /></Field>}
+          <option value="native">FinPlan (uses the data source)</option><option value="tradingview">TradingView live widget</option></select></Field>}
       </div>
       {x.source === 'alpaca' && x.symbols.some((sy) => !alpacaCan(sy)) && <div className="small neg mt-s">Alpaca covers US stocks/ETFs and crypto only: {x.symbols.filter((sy) => !alpacaCan(sy)).join(', ')} won't load from Alpaca.</div>}
       <div className="mt"><b>{x.type === 'quote' ? 'Pick a symbol' : x.type === 'ratio' || x.type === 'compare' ? 'Pick 2 symbols (A, then B)' : 'Pick symbols'}</b> <span className="small muted">· selected: {x.symbols.join(x.type === 'ratio' ? ' ÷ ' : x.type === 'compare' ? ' vs ' : ', ') || 'none'}</span></div>

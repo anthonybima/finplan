@@ -91,8 +91,7 @@ export interface Widget {
   range: '1D' | '5D' | '1M' | '3M' | '6M' | 'YTD' | '1Y' | '5Y';
   chart: 'area' | 'line' | 'candle'; size: 's' | 'm' | 'l';
   source?: 'auto' | 'yahoo' | 'alpaca'; // where FinPlan gets the numbers
-  view?: 'native' | 'tradingview' | 'investing'; // draw with FinPlan, or embed TradingView / Investing.com's live chart
-  invPair?: number; // Investing.com pair_ID override
+  view?: 'native' | 'tradingview'; // draw with FinPlan, or embed TradingView's live chart
 }
 export interface MarketDashboard { id: string; name: string; refreshSec: number; widgets: Widget[] }
 

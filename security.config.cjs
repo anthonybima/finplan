@@ -17,7 +17,7 @@ const csp = [
   "img-src 'self' data: blob: https:",
   "font-src 'self' data:",
   `connect-src ${connect.join(' ')}`,
-  "frame-src https://*.tradingview.com https://www.tradingview-widget.com https://ssltvc.investing.com",
+  "frame-src https://*.tradingview.com https://www.tradingview-widget.com",
   "worker-src 'self'",
   "manifest-src 'self'",
   "object-src 'none'",

@@ -143,9 +143,6 @@ const TV_WIDGET_OK = /^(INDEX|FOREXCOM|TVC|OANDA|FX_IDC|AMEX|NASDAQ|NYSE|BATS|BI
 export const tvWidgetOk = (tv?: string) => !!tv && TV_WIDGET_OK.test(tv) && !/^INDEX:(SXXP|FTSEMIB|IBEX35|AEX|OMXS30|BEL20)$/.test(tv);
 export const GROUPS = [...new Set(CATALOG.map((i) => i.group))];
 
-/** Investing.com official chart widget (webmaster tools). Pair IDs: Investing.com → Webmaster Tools → Technical Charts → pick a symbol → copy pair_ID from the embed code. */
-export const investingChartUrl = (pairId: number) => `https://ssltvc.investing.com/init.php?domain_ID=1&lang_ID=1&pair_ID=${pairId}&timezone_ID=8`;
-export const ALGOBARS_URL = 'https://algobars.com';
 
 /** Stockbit has no public API or embeddable chart; FinPlan opens the stock in Stockbit instead. */
 export const stockbitUrl = (sym: string) => `https://stockbit.com/symbol/${sym.replace(/\.JK$/, '')}`;
