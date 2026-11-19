@@ -5,6 +5,7 @@ import { clearMarketCache, getSeries, type Pt } from '../lib/market';
 import { buildRecap, lastSessions, leadLag, pct, PERIODS, recapSymbols, REGIONS, trendOf, type Period, type Trend } from '../lib/recap';
 import { findInstrument } from '../lib/marketCatalog';
 import { Card, Seg } from '../components/ui';
+import { BreadthCalendar } from '../components/BreadthCalendar';
 
 const tone = (r: number | null | undefined) => (r == null ? '' : r > 0.0005 ? 'up' : r < -0.0005 ? 'down' : 'flat');
 const heat = (r: number) => { const a = Math.min(1, Math.abs(r) / 0.02); return r >= 0 ? `rgba(22,163,74,${0.12 + a * 0.55})` : `rgba(220,38,38,${0.12 + a * 0.55})`; };
@@ -65,6 +66,8 @@ export default function Recap(_: ViewProps) {
           </tbody></table>
         </Card>
       </div>
+
+      <BreadthCalendar />
 
       <Card title={`Leaders & laggards · ${period}`}>
         <div className="grid g-2">
