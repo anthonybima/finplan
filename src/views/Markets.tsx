@@ -12,12 +12,13 @@ import TVWidget from '../components/TVWidget';
 
 const W = (type: Widget['type'], title: string, symbols: string[], range: RangeKey = '1D', size: Widget['size'] = 's', chart: Widget['chart'] = 'area'): Widget => ({ id: uid(), type, title, symbols, range, chart, size });
 
-export const MARKETS_LAYOUT = 5;
+export const MARKETS_LAYOUT = 6;
 /** Macro charts on the main tab: dollar, size, growth vs value, stocks vs gold. */
 const MACRO_WIDGETS = (): Widget[] => [
   W('quote', 'DXY (US Dollar Index)', ['DX-Y.NYB'], '1M', 'm'),
   W('ratio', 'IWM / SPY (small vs large caps)', ['IWM', 'SPY'], '1Y', 'm', 'line'),
   W('ratio', 'IWM / QQQ (small caps vs Nasdaq 100)', ['IWM', 'QQQ'], '1Y', 'm', 'line'),
+  W('ratio', 'RSP / QQQ (equal-weight S&P vs Nasdaq 100)', ['RSP', 'QQQ'], '1Y', 'm', 'line'),
   W('ratio', 'SPY / Gold (GLD)', ['SPY', 'GLD'], '1Y', 'm', 'line'),
   W('ratio', 'S&P 500 / Nasdaq Composite (INX / IXIC)', ['^GSPC', '^IXIC'], '1Y', 'm', 'line'),
 ];
